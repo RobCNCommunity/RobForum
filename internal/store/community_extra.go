@@ -1,0 +1,453 @@
+package store
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"roblox-community/internal/domain"
+)
+
+func (s *Store) ListPublicAds() ([]domain.AdSlot, error) {
+	rows, err := s.db.Query(`SELECT id, title, image_url, link_url, sort_order, enabled, created_at, updated_at FROM ad_slots WHERE enabled = 1 ORDER BY sort_order ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.AdSlot, 0)
+	for rows.Next() {
+		item, err := scanAd(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListAdminAds() ([]domain.AdSlot, error) {
+	rows, err := s.db.Query(`SELECT id, title, image_url, link_url, sort_order, enabled, created_at, updated_at FROM ad_slots ORDER BY sort_order ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.AdSlot, 0)
+	for rows.Next() {
+		item, err := scanAd(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+type adScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAd(row adScanner) (domain.AdSlot, error) {
+	var item domain.AdSlot
+	var enabled int
+	err := row.Scan(&item.ID, &item.Title, &item.ImageURL, &item.LinkURL, &item.SortOrder, &enabled, &item.CreatedAt, &item.UpdatedAt)
+	item.Enabled = enabled != 0
+	if validateWebURL(item.ImageURL, true) != nil {
+		item.ImageURL = ""
+	}
+	if validateWebURL(item.LinkURL, true) != nil {
+		item.LinkURL = ""
+	}
+	return item, err
+}
+
+func (s *Store) CreateAd(actorID int64, title, imageURL, linkURL string, sortOrder int, enabled bool) (domain.AdSlot, error) {
+	title = strings.TrimSpace(title)
+	imageURL = strings.TrimSpace(imageURL)
+	linkURL = strings.TrimSpace(linkURL)
+	if imageURL == "" && title == "" {
+		return domain.AdSlot{}, errors.New("广告标题或图片至少填一项")
+	}
+	if len([]rune(title)) > 120 || sortOrder < -10000 || sortOrder > 10000 || containsControl(title) || validateWebURL(imageURL, true) != nil || validateWebURL(linkURL, true) != nil {
+		return domain.AdSlot{}, errors.New("广告内容或链接无效")
+	}
+	now := time.Now().UTC()
+	en := 0
+	if enabled {
+		en = 1
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`INSERT INTO ad_slots (title, image_url, link_url, sort_order, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, title, imageURL, linkURL, sortOrder, en, now, now)
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'ad', ?, 'create', '', ?)`, actorID, id, now); err != nil {
+		return domain.AdSlot{}, err
+	}
+	item, err := getAd(tx, id)
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.AdSlot{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) GetAd(id int64) (domain.AdSlot, error) {
+	return getAd(s.db, id)
+}
+
+func getAd(queryer rowQueryer, id int64) (domain.AdSlot, error) {
+	row := queryer.QueryRow(`SELECT id, title, image_url, link_url, sort_order, enabled, created_at, updated_at FROM ad_slots WHERE id = ?`, id)
+	return scanAd(row)
+}
+
+func (s *Store) UpdateAd(actorID, id int64, title, imageURL, linkURL string, sortOrder int, enabled bool) (domain.AdSlot, error) {
+	title = strings.TrimSpace(title)
+	imageURL = strings.TrimSpace(imageURL)
+	linkURL = strings.TrimSpace(linkURL)
+	if imageURL == "" && title == "" {
+		return domain.AdSlot{}, errors.New("广告标题或图片至少填一项")
+	}
+	if len([]rune(title)) > 120 || sortOrder < -10000 || sortOrder > 10000 || containsControl(title) || validateWebURL(imageURL, true) != nil || validateWebURL(linkURL, true) != nil {
+		return domain.AdSlot{}, errors.New("广告内容或链接无效")
+	}
+	en := 0
+	if enabled {
+		en = 1
+	}
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE ad_slots SET title = ?, image_url = ?, link_url = ?, sort_order = ?, enabled = ?, updated_at = ? WHERE id = ?`, title, imageURL, linkURL, sortOrder, en, now, id)
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	if n == 0 {
+		return domain.AdSlot{}, errors.New("广告不存在")
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'ad', ?, 'update', '', ?)`, actorID, id, now); err != nil {
+		return domain.AdSlot{}, err
+	}
+	item, err := getAd(tx, id)
+	if err != nil {
+		return domain.AdSlot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.AdSlot{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) DeleteAd(actorID, id int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`DELETE FROM ad_slots WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("广告不存在")
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'ad', ?, 'delete', '', ?)`, actorID, id, time.Now().UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListPublicNotices(limit int) ([]domain.Notice, error) {
+	if limit < 1 || limit > 50 {
+		limit = 20
+	}
+	rows, err := s.db.Query(`SELECT id, title, content, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE enabled = 1 ORDER BY pinned DESC, updated_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.Notice, 0)
+	for rows.Next() {
+		item, err := scanNotice(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListAdminNotices() ([]domain.Notice, error) {
+	rows, err := s.db.Query(`SELECT id, title, content, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices ORDER BY pinned DESC, updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.Notice, 0)
+	for rows.Next() {
+		item, err := scanNotice(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func scanNotice(row adScanner) (domain.Notice, error) {
+	var item domain.Notice
+	var pinned, enabled int
+	err := row.Scan(&item.ID, &item.Title, &item.Content, &item.Level, &pinned, &enabled, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	item.Pinned = pinned != 0
+	item.Enabled = enabled != 0
+	return item, err
+}
+
+func (s *Store) CreateNotice(userID int64, title, content, level string, pinned, enabled bool) (domain.Notice, error) {
+	title = strings.TrimSpace(title)
+	content = strings.TrimSpace(content)
+	level = strings.TrimSpace(level)
+	if title == "" || content == "" {
+		return domain.Notice{}, errors.New("公告标题和内容不能为空")
+	}
+	if level == "" {
+		level = "info"
+	}
+	if len([]rune(title)) > 160 || len([]rune(content)) > 10000 || containsControl(title) || containsControl(content) {
+		return domain.Notice{}, errors.New("公告标题或内容过长")
+	}
+	if level != "info" && level != "success" && level != "warning" && level != "error" {
+		return domain.Notice{}, errors.New("公告级别无效")
+	}
+	now := time.Now().UTC()
+	p, e := 0, 0
+	if pinned {
+		p = 1
+	}
+	if enabled {
+		e = 1
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`INSERT INTO notices (title, content, level, pinned, enabled, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, title, content, level, p, e, userID, now, now)
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'notice', ?, 'create', '', ?)`, userID, id, now); err != nil {
+		return domain.Notice{}, err
+	}
+	item, err := getNotice(tx, id)
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Notice{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) GetNotice(id int64) (domain.Notice, error) {
+	return getNotice(s.db, id)
+}
+
+func getNotice(queryer rowQueryer, id int64) (domain.Notice, error) {
+	row := queryer.QueryRow(`SELECT id, title, content, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE id = ?`, id)
+	return scanNotice(row)
+}
+
+func (s *Store) UpdateNotice(actorID, id int64, title, content, level string, pinned, enabled bool) (domain.Notice, error) {
+	title = strings.TrimSpace(title)
+	content = strings.TrimSpace(content)
+	level = strings.TrimSpace(level)
+	if title == "" || content == "" {
+		return domain.Notice{}, errors.New("公告标题和内容不能为空")
+	}
+	if level == "" {
+		level = "info"
+	}
+	if len([]rune(title)) > 160 || len([]rune(content)) > 10000 || containsControl(title) || containsControl(content) {
+		return domain.Notice{}, errors.New("公告标题或内容过长")
+	}
+	if level != "info" && level != "success" && level != "warning" && level != "error" {
+		return domain.Notice{}, errors.New("公告级别无效")
+	}
+	p, e := 0, 0
+	if pinned {
+		p = 1
+	}
+	if enabled {
+		e = 1
+	}
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE notices SET title = ?, content = ?, level = ?, pinned = ?, enabled = ?, updated_at = ? WHERE id = ?`, title, content, level, p, e, now, id)
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	if n == 0 {
+		return domain.Notice{}, errors.New("公告不存在")
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'notice', ?, 'update', '', ?)`, actorID, id, now); err != nil {
+		return domain.Notice{}, err
+	}
+	item, err := getNotice(tx, id)
+	if err != nil {
+		return domain.Notice{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Notice{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) DeleteNotice(actorID, id int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`DELETE FROM notices WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("公告不存在")
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'notice', ?, 'delete', '', ?)`, actorID, id, time.Now().UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SetPostPinned(actorID, id int64, pinned bool) (domain.Post, error) {
+	val := 0
+	if pinned {
+		val = 1
+	}
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Post{}, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE posts SET pinned = ?, updated_at = ? WHERE id = ? AND status = 'published'`, val, now, id)
+	if err != nil {
+		return domain.Post{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return domain.Post{}, err
+	}
+	if n == 0 {
+		return domain.Post{}, fmt.Errorf("帖子不存在")
+	}
+	action := "unpin"
+	if pinned {
+		action = "pin"
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'post', ?, ?, '', ?)`, actorID, id, action, now); err != nil {
+		return domain.Post{}, err
+	}
+	item, err := getPost(tx, id)
+	if err != nil {
+		return domain.Post{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Post{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) UserWalletSummary(userID int64, limit int) (domain.WalletSummary, error) {
+	if limit < 1 || limit > 100 {
+		limit = 30
+	}
+	available, err := s.CreatorBalance(userID)
+	if err != nil {
+		return domain.WalletSummary{}, err
+	}
+	rows, err := s.db.Query(`SELECT id, user_id, entry_type, amount_cents, reference_type, reference_id, note, created_at FROM wallet_ledgers WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return domain.WalletSummary{}, err
+	}
+	defer rows.Close()
+	entries := make([]domain.WalletEntry, 0)
+	for rows.Next() {
+		var item domain.WalletEntry
+		if err := rows.Scan(&item.ID, &item.UserID, &item.EntryType, &item.AmountCents, &item.ReferenceType, &item.ReferenceID, &item.Note, &item.CreatedAt); err != nil {
+			return domain.WalletSummary{}, err
+		}
+		entries = append(entries, item)
+	}
+	return domain.WalletSummary{AvailableCents: available, Entries: entries}, rows.Err()
+}
+
+func (s *Store) EnsureCommunitySeeds() error {
+	now := time.Now().UTC()
+	var adCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ad_slots`).Scan(&adCount); err != nil {
+		return err
+	}
+	if adCount == 0 {
+		_, err := s.db.Exec(`INSERT INTO ad_slots (title, image_url, link_url, sort_order, enabled, created_at, updated_at) VALUES
+			(?, '', '', 1, 1, ?, ?),
+			(?, '', '', 2, 1, ?, ?)`,
+			"欢迎加入罗布玩家社区", now, now,
+			"投稿资源 · 组队交流 · 攻略分享", now, now)
+		if err != nil {
+			return err
+		}
+	}
+	var noticeCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM notices`).Scan(&noticeCount); err != nil {
+		return err
+	}
+	if noticeCount == 0 {
+		_, err := s.db.Exec(`INSERT INTO notices (title, content, level, pinned, enabled, created_by, created_at, updated_at) VALUES (?, ?, 'info', 1, 1, NULL, ?, ?)`,
+			"社区公告", "欢迎来到玩家社区。请友善交流，资源投稿需审核。本站为玩家社区，与 Roblox 官方无关。", now, now)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

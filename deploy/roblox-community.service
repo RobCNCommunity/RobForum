@@ -1,0 +1,23 @@
+[Unit]
+Description=Roblox Community
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roblox-community
+Group=roblox-community
+WorkingDirectory=/opt/roblox-community
+EnvironmentFile=/etc/roblox-community/roblox-community.env
+ExecStart=/opt/roblox-community/bin/roblox-community
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/roblox-community/data
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: roblox_community
+      MYSQL_USER: roblox
+      MYSQL_PASSWORD: change-me
+      MYSQL_ROOT_PASSWORD: change-root-password
+    ports:
+      - "3306:3306"
+    volumes:
+      - roblox_mysql:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+volumes:
+  roblox_mysql:
