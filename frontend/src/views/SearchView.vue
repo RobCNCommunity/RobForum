@@ -7,9 +7,9 @@ import AppIcon from '@/components/AppIcon.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
-import { postTypeLabel } from '@/postTypes'
+import PostTagList from '@/components/PostTagList.vue'
 
-type SearchTab = 'all' | 'posts' | 'guides' | 'resources' | 'users'
+type SearchTab = 'all' | 'posts' | 'resources' | 'users'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,16 +18,15 @@ const activeTab = ref<SearchTab>('all')
 const loading = ref(false)
 const error = ref('')
 const activeQuery = ref('')
-const emptyResults = (): CommunitySearchResult => ({ query: '', posts: [], guides: [], resources: [], users: [] })
+const emptyResults = (): CommunitySearchResult => ({ query: '', posts: [], resources: [], users: [] })
 const results = ref<CommunitySearchResult>(emptyResults())
 let searchVersion = 0
 
-const total = computed(() => results.value.posts.length + results.value.guides.length + results.value.resources.length + results.value.users.length)
+const total = computed(() => results.value.posts.length + results.value.resources.length + results.value.users.length)
 const hasQuery = computed(() => Boolean(activeQuery.value))
 const tabs = computed(() => [
   { key: 'all' as const, label: '全部', count: total.value },
   { key: 'posts' as const, label: '帖子', count: results.value.posts.length },
-  { key: 'guides' as const, label: '攻略', count: results.value.guides.length },
   { key: 'resources' as const, label: '资源', count: results.value.resources.length },
   { key: 'users' as const, label: '用户', count: results.value.users.length },
 ])
@@ -110,7 +109,7 @@ watch(
           </button>
           <form class="rf-search-form" role="search" @submit.prevent="submitSearch">
             <AppIcon name="search" size="19" />
-            <input v-model="search" type="search" autocomplete="off" maxlength="80" aria-label="搜索帖子、攻略、资源和用户" placeholder="搜索帖子、攻略、资源和用户" @keydown.esc="clearSearch" />
+            <input v-model="search" type="search" autocomplete="off" maxlength="80" aria-label="搜索帖子、资源和用户" placeholder="搜索帖子、资源和用户" @keydown.esc="clearSearch" />
             <button v-if="search" type="button" class="rf-search-clear" aria-label="清除搜索" title="清除搜索" @click="clearSearch">
               <AppIcon name="close" size="16" />
             </button>
@@ -150,24 +149,10 @@ watch(
               <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" />
               <span class="rf-search-copy">
                 <span class="rf-search-author"><strong>{{ post.author_name }}</strong><VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /><MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" /><small>@user_{{ post.author_id }}</small></span>
-                <span class="rf-search-post-meta"><em>{{ post.board_name }}</em><span>{{ postTypeLabel(post.post_type) }}</span></span>
-                <strong class="rf-search-title">{{ post.title }}</strong>
-                <span v-if="excerpt(post.content)" class="rf-search-excerpt">{{ excerpt(post.content) }}</span>
-                <span class="rf-search-stats"><span><AppIcon name="message" size="15" />{{ post.comment_count }}</span><span><AppIcon name="heart" size="15" />{{ post.like_count }}</span></span>
-              </span>
-              <AppIcon name="chevron" size="18" />
-            </RouterLink>
-          </section>
-
-          <section v-if="(activeTab === 'all' || activeTab === 'guides') && results.guides.length" class="rf-search-group" aria-labelledby="search-guides-title">
-            <header><h1 id="search-guides-title">攻略</h1><span>{{ results.guides.length }} 条结果</span></header>
-            <RouterLink v-for="post in results.guides" :key="post.id" :to="`/posts/${post.id}`" class="rf-search-post">
-              <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" />
-              <span class="rf-search-copy">
-                <span class="rf-search-author"><strong>{{ post.author_name }}</strong><VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /><MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" /><small>@user_{{ post.author_id }}</small></span>
-                <span class="rf-search-post-meta"><em>攻略</em><span>{{ post.board_name }}</span></span>
-                <strong class="rf-search-title">{{ post.title }}</strong>
-                <span v-if="excerpt(post.content)" class="rf-search-excerpt">{{ excerpt(post.content) }}</span>
+                <span class="rf-search-post-meta"><em>{{ post.board_name }}</em></span>
+                <PostTagList :tags="post.tags" compact class="rf-search-tags" />
+                <strong v-if="post.title" class="rf-search-title">{{ post.title }}</strong>
+                <span v-if="excerpt(post.content)" class="rf-search-excerpt" :class="{ primary: !post.title }">{{ excerpt(post.content) }}</span>
                 <span class="rf-search-stats"><span><AppIcon name="message" size="15" />{{ post.comment_count }}</span><span><AppIcon name="heart" size="15" />{{ post.like_count }}</span></span>
               </span>
               <AppIcon name="chevron" size="18" />
@@ -212,7 +197,7 @@ watch(
       <div v-else class="rf-search-empty rf-search-empty--start">
         <AppIcon name="search" size="31" />
         <strong>搜索社区</strong>
-        <span>帖子、攻略、资源和用户会在同一处呈现。</span>
+        <span>帖子、资源和用户会在同一处呈现。</span>
       </div>
     </section>
   </PageContainer>
@@ -231,6 +216,7 @@ watch(
 .rf-search-results { min-width: 0; }.rf-search-group + .rf-search-group { margin-top: 10px; border-top: 10px solid var(--rf-bg-subtle); }.rf-search-group > header { display: flex; min-height: 56px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--rf-line); }.rf-search-group h1 { margin: 0; font-family: var(--rf-font-display); font-size: 20px; }.rf-search-group > header span { color: var(--rf-muted); font-size: 12px; }
 .rf-search-post, .rf-search-resource, .rf-search-user { display: grid; min-width: 0; grid-template-columns: 42px minmax(0, 1fr) 20px; align-items: start; gap: 11px; padding: 14px 16px; border-bottom: 1px solid var(--rf-line); color: var(--rf-text); transition: background-color 140ms ease-out; }.rf-search-post:hover, .rf-search-resource:hover, .rf-search-user:hover { color: var(--rf-text); background: var(--rf-bg-hover); }.rf-search-post > svg, .rf-search-resource > svg, .rf-search-user > svg { align-self: center; color: var(--rf-faint); }
 .rf-search-copy { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; }.rf-search-author { display: flex; max-width: 100%; align-items: center; gap: 5px; line-height: 1.2; }.rf-search-author strong { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }.rf-search-author small, .rf-search-copy > small { overflow: hidden; color: var(--rf-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.rf-search-post-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--rf-muted); font-size: 12px; }.rf-search-post-meta em { padding: 1px 6px; border-radius: var(--rf-pill); color: var(--primary); background: color-mix(in srgb, var(--primary) 9%, transparent); font-style: normal; }.rf-search-title { display: block; max-width: 100%; margin-top: 5px; font-family: var(--rf-font-display); font-size: 16px; line-height: 1.35; }.rf-search-excerpt { display: -webkit-box; max-width: 100%; margin-top: 3px; overflow: hidden; color: var(--rf-muted); font-size: 13px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }.rf-search-stats { display: flex; align-items: center; gap: 17px; margin-top: 8px; color: var(--rf-muted); font-size: 12px; }.rf-search-stats span { display: inline-flex; align-items: center; gap: 4px; }
+.rf-search-tags { margin-top: 5px; }.rf-search-excerpt.primary { color: var(--rf-text); font-size: 14px; }
 .rf-search-resource { grid-template-columns: 42px minmax(0, 1fr) 20px; align-items: center; }.rf-search-resource-mark { display: inline-grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }.rf-search-resource-meta { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; margin-top: 7px; color: var(--rf-muted); font-size: 12px; }.rf-search-resource-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.rf-search-resource-meta b { flex: 0 0 auto; color: var(--rf-text); }
 .rf-search-user { grid-template-columns: 48px minmax(0, 1fr) 20px; align-items: center; }.rf-search-user-stats { margin-top: 5px; color: var(--rf-muted); font-size: 12px; }.rf-search-user-stats b { color: var(--rf-text); font-variant-numeric: tabular-nums; }.rf-search-user-stats i { margin: 0 4px; color: var(--rf-faint); font-style: normal; }
 .rf-search-empty { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 40px 24px; color: var(--rf-muted); text-align: center; }.rf-search-empty > svg { margin-bottom: 5px; color: var(--primary); }.rf-search-empty strong { color: var(--rf-text); font-size: 20px; }.rf-search-empty span { max-width: 30ch; line-height: 1.55; }.rf-search-empty--start { min-height: calc(100vh - 160px); }.rf-search-empty--tab { min-height: 200px; }

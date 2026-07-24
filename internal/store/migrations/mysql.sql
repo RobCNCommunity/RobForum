@@ -158,7 +158,6 @@ CREATE TABLE IF NOT EXISTS posts (
   author_id BIGINT NOT NULL,
   title VARCHAR(180) NOT NULL,
   content MEDIUMTEXT NOT NULL,
-  post_type VARCHAR(24) NOT NULL DEFAULT 'discussion',
   status VARCHAR(24) NOT NULL DEFAULT 'published',
   pinned TINYINT(1) NOT NULL DEFAULT 0,
   featured TINYINT(1) NOT NULL DEFAULT 0,
@@ -189,16 +188,28 @@ CREATE TABLE IF NOT EXISTS post_media (
   CONSTRAINT fk_post_media_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS post_tags (
+  post_id BIGINT NOT NULL,
+  tag VARCHAR(24) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (post_id, tag),
+  INDEX idx_post_tags_tag (tag, post_id),
+  CONSTRAINT fk_post_tags_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS comments (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   post_id BIGINT NOT NULL,
+  parent_id BIGINT NULL,
   author_id BIGINT NOT NULL,
   content TEXT NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'published',
   created_at DATETIME(6) NOT NULL,
   INDEX idx_comments_post (post_id, status, created_at),
+  INDEX idx_comments_parent (parent_id, status, created_at),
   INDEX idx_comments_author (author_id, status, post_id),
   CONSTRAINT fk_comments_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_comments_parent FOREIGN KEY (parent_id) REFERENCES comments(id) ON DELETE SET NULL,
   CONSTRAINT fk_comments_author FOREIGN KEY (author_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

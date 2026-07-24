@@ -223,7 +223,7 @@ func (s *Store) ListFollowingPostsPage(userID int64, limit, offset int) (domain.
 	if offset < 0 || offset > 100000 {
 		offset = 0
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND (p.author_id = ? OR EXISTS (SELECT 1 FROM user_follows uf WHERE uf.follower_id = ? AND uf.followed_id = p.author_id)) AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE (ub.blocker_id = ? AND ub.blocked_id = p.author_id) OR (ub.blocker_id = p.author_id AND ub.blocked_id = ?)) ORDER BY p.pinned DESC, p.updated_at DESC LIMIT ? OFFSET ?`, userID, userID, userID, userID, limit+1, offset)
+	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND (p.author_id = ? OR EXISTS (SELECT 1 FROM user_follows uf WHERE uf.follower_id = ? AND uf.followed_id = p.author_id)) AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE (ub.blocker_id = ? AND ub.blocked_id = p.author_id) OR (ub.blocker_id = p.author_id AND ub.blocked_id = ?)) ORDER BY p.pinned DESC, p.updated_at DESC LIMIT ? OFFSET ?`, userID, userID, userID, userID, limit+1, offset)
 	if err != nil {
 		return domain.PostPage{}, err
 	}
@@ -232,7 +232,7 @@ func (s *Store) ListFollowingPostsPage(userID int64, limit, offset int) (domain.
 	for rows.Next() {
 		var item domain.Post
 		var authorVerified, authorMember, pinned, featured int
-		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return domain.PostPage{}, err
 		}
 		item.AuthorVerified = authorVerified != 0
@@ -261,7 +261,7 @@ func (s *Store) ListBookmarkedPosts(userID int64, limit int) ([]domain.Post, err
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM post_bookmarks pb JOIN posts p ON p.id = pb.post_id JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE pb.user_id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' ORDER BY pb.created_at DESC LIMIT ?`, userID, limit)
+	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM post_bookmarks pb JOIN posts p ON p.id = pb.post_id JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE pb.user_id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' ORDER BY pb.created_at DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func (s *Store) ListBookmarkedPosts(userID int64, limit int) ([]domain.Post, err
 	for rows.Next() {
 		var item domain.Post
 		var authorVerified, authorMember, pinned, featured int
-		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.AuthorVerified = authorVerified != 0

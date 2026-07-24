@@ -18,16 +18,32 @@ type PostMediaInput struct {
 	SizeBytes  int64
 }
 
+const maxPostMediaSize = 50 << 20
+
+const maxPostImageSize = 5 << 20
+
 func validatePostMedia(input PostMediaInput) error {
 	input.StoredName = strings.TrimSpace(input.StoredName)
 	input.MIMEType = strings.ToLower(strings.TrimSpace(input.MIMEType))
 	if input.StoredName == "" || len(input.StoredName) > 255 || filepath.Base(input.StoredName) != input.StoredName || strings.ContainsAny(input.StoredName, `/\`) {
 		return errors.New("post media filename is invalid")
 	}
-	if input.MIMEType != "image/png" && input.MIMEType != "image/jpeg" {
+	isImage := input.MIMEType == "image/png" || input.MIMEType == "image/jpeg"
+	isVideo := input.MIMEType == "video/mp4" || input.MIMEType == "video/webm"
+	if !isImage && !isVideo {
 		return errors.New("post media type is invalid")
 	}
-	if input.Width < 1 || input.Height < 1 || input.Width > 8192 || input.Height > 8192 || input.SizeBytes < 1 || input.SizeBytes > 5<<20 {
+	if isImage && (input.Width < 1 || input.Height < 1 || input.Width > 8192 || input.Height > 8192) {
+		return errors.New("post media dimensions or size are invalid")
+	}
+	if isVideo && (input.Width != 0 || input.Height != 0) {
+		return errors.New("post media dimensions or size are invalid")
+	}
+	maxSize := int64(maxPostMediaSize)
+	if isImage {
+		maxSize = maxPostImageSize
+	}
+	if input.SizeBytes < 1 || input.SizeBytes > maxSize {
 		return errors.New("post media dimensions or size are invalid")
 	}
 	return nil
@@ -97,5 +113,11 @@ func attachPostMedia(queryer sqlQueryer, posts []domain.Post) error {
 		item.URL = "/api/v1/media/posts/" + storedName
 		posts[index].Media = append(posts[index].Media, item)
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return attachPostTags(queryer, posts)
 }

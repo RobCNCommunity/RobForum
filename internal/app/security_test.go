@@ -27,16 +27,85 @@ func TestRequestLimiter(t *testing.T) {
 	}
 }
 
-func TestRequestClientIPOnlyTrustsLoopbackProxy(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
-	request.RemoteAddr = "198.51.100.20:1234"
-	request.Header.Set("X-Forwarded-For", "203.0.113.10")
-	if got := requestClientIP(request); got != "198.51.100.20" {
-		t.Fatalf("untrusted forwarding header accepted: %q", got)
+func TestRateLimit_keeps_chat_stream_available_when_API_bucket_is_exhausted(t *testing.T) {
+	// Given
+	server := &Server{limiter: newRequestLimiter()}
+	handler := server.rateLimit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for index := 0; index < 360; index++ {
+		request := httptest.NewRequest(http.MethodGet, "http://example.com/api/v1/posts", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("generic API request %d was limited early: %d", index+1, recorder.Code)
+		}
 	}
+
+	// When
+	request := httptest.NewRequest(http.MethodGet, "http://example.com/api/v1/conversations/42/stream", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	// Then
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("chat stream shared the exhausted generic API bucket: %d", recorder.Code)
+	}
+}
+
+func TestRequestClientIP_requires_explicit_trusted_proxy(t *testing.T) {
+	// Given
+	request := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
 	request.RemoteAddr = "127.0.0.1:1234"
-	if got := requestClientIP(request); got != "203.0.113.10" {
-		t.Fatalf("trusted local proxy header rejected: %q", got)
+	request.Header.Set("X-Forwarded-For", "203.0.113.10")
+
+	// When
+	got := requestClientIP(request, nil)
+
+	// Then
+	if got != "127.0.0.1" {
+		t.Fatalf("forwarding header was trusted without configuration: %q", got)
+	}
+}
+
+func TestRequestClientIP_uses_rightmost_untrusted_forwarded_hop(t *testing.T) {
+	// Given
+	trusted, err := parseTrustedProxyCIDRs("127.0.0.1/32, 10.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("X-Forwarded-For", "198.51.100.99, 203.0.113.10, 10.1.2.3")
+
+	// When
+	got := requestClientIP(request, trusted)
+
+	// Then
+	if got != "203.0.113.10" {
+		t.Fatalf("spoofed leftmost hop was accepted: %q", got)
+	}
+}
+
+func TestRequestScheme_only_trusts_configured_proxy(t *testing.T) {
+	// Given
+	request := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("X-Forwarded-Proto", "https")
+
+	// When / Then
+	if got := requestScheme(request, nil); got != "http" {
+		t.Fatalf("forwarded scheme was trusted without configuration: %q", got)
+	}
+	trusted, err := parseTrustedProxyCIDRs("127.0.0.1/32")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := requestScheme(request, trusted); got != "https" {
+		t.Fatalf("configured proxy scheme was rejected: %q", got)
+	}
+	if _, err := parseTrustedProxyCIDRs("127.0.0.1/32,not-a-cidr"); err == nil {
+		t.Fatal("invalid trusted proxy configuration was accepted")
 	}
 }
 
@@ -44,12 +113,12 @@ func TestSameOriginRequest(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "https://community.example.com/api/v1/posts", nil)
 	request.Host = "community.example.com"
 	request.Header.Set("Origin", "https://community.example.com")
-	present, valid := sameOriginRequest(request, "https://community.example.com")
+	present, valid := sameOriginRequest(request, "https://community.example.com", nil)
 	if !present || !valid {
 		t.Fatal("same-origin request rejected")
 	}
 	request.Header.Set("Origin", "https://evil.example")
-	if _, valid := sameOriginRequest(request, "https://community.example.com"); valid {
+	if _, valid := sameOriginRequest(request, "https://community.example.com", nil); valid {
 		t.Fatal("cross-origin request accepted")
 	}
 }

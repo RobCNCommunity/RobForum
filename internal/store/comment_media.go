@@ -12,7 +12,8 @@ import (
 
 const (
 	maxCommentMediaCount = 4
-	maxCommentMediaSize  = 5 << 20
+	maxCommentMediaSize  = 50 << 20
+	maxCommentImageSize  = 5 << 20
 )
 
 type CommentMediaInput struct {
@@ -29,10 +30,22 @@ func validateCommentMedia(input CommentMediaInput) error {
 	if input.StoredName == "" || len(input.StoredName) > 255 || filepath.Base(input.StoredName) != input.StoredName || strings.ContainsAny(input.StoredName, `/\`) {
 		return errors.New("comment media filename is invalid")
 	}
-	if input.MIMEType != "image/png" && input.MIMEType != "image/jpeg" {
+	isImage := input.MIMEType == "image/png" || input.MIMEType == "image/jpeg"
+	isVideo := input.MIMEType == "video/mp4" || input.MIMEType == "video/webm"
+	if !isImage && !isVideo {
 		return errors.New("comment media type is invalid")
 	}
-	if input.Width < 1 || input.Height < 1 || input.Width > 8192 || input.Height > 8192 || input.SizeBytes < 1 || input.SizeBytes > maxCommentMediaSize {
+	if isImage && (input.Width < 1 || input.Height < 1 || input.Width > 8192 || input.Height > 8192) {
+		return errors.New("comment media dimensions or size are invalid")
+	}
+	if isVideo && (input.Width != 0 || input.Height != 0) {
+		return errors.New("comment media dimensions or size are invalid")
+	}
+	maxSize := int64(maxCommentMediaSize)
+	if isImage {
+		maxSize = maxCommentImageSize
+	}
+	if input.SizeBytes < 1 || input.SizeBytes > maxSize {
 		return errors.New("comment media dimensions or size are invalid")
 	}
 	return nil
@@ -122,4 +135,29 @@ func (s *Store) CommentMediaAccess(storedName string, viewerID int64, isAdmin bo
 	_ = commentID
 	_ = ignoredPostID
 	return item, allowed, publiclyVisible, nil
+}
+
+func (s *Store) ListDeletedCommentMediaNames(limit int) ([]string, error) {
+	if limit < 1 || limit > 1000 {
+		limit = 500
+	}
+	rows, err := s.db.Query(`SELECT cm.stored_name FROM comment_media cm JOIN comments c ON c.id = cm.comment_id WHERE c.status = 'deleted' ORDER BY cm.id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]string, 0)
+	for rows.Next() {
+		var storedName string
+		if err := rows.Scan(&storedName); err != nil {
+			return nil, err
+		}
+		result = append(result, storedName)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) DeleteDeletedCommentMediaRecord(storedName string) error {
+	_, err := s.db.Exec(`DELETE FROM comment_media WHERE stored_name = ? AND comment_id IN (SELECT id FROM comments WHERE status = 'deleted')`, storedName)
+	return err
 }

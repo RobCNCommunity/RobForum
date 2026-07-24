@@ -7,14 +7,29 @@ const props = withDefaults(defineProps<{
   media?: PostMedia[]
   compact?: boolean
   preview?: boolean
+  customPreview?: boolean
 }>(), {
   media: () => [],
   compact: false,
   preview: true,
+  customPreview: false,
 })
 
+const emit = defineEmits<{
+  'open-preview': [index: number]
+}>()
+
 const items = computed(() => props.media.slice(0, 4))
+const imageItems = computed(() => items.value.filter((item) => isImage(item)))
 const layoutClass = computed(() => `count-${items.value.length}`)
+
+function isImage(item: PostMedia) {
+  return item.mime_type.startsWith('image/')
+}
+
+function isVideo(item: PostMedia) {
+  return item.mime_type.startsWith('video/')
+}
 
 function ratio(item: PostMedia) {
   if (!item.width || !item.height) return '16 / 9'
@@ -22,16 +37,23 @@ function ratio(item: PostMedia) {
 }
 
 function openPreview(event: MouseEvent, index: number) {
-  if (!props.preview) return
+  const item = items.value[index]
+  if (!item || !isImage(item) || !props.preview) return
   event.preventDefault()
   event.stopPropagation()
+  const imageIndex = imageItems.value.findIndex((candidate) => candidate.id === item.id && candidate.url === item.url)
+  if (imageIndex < 0) return
+  if (props.customPreview) {
+    emit('open-preview', imageIndex)
+    return
+  }
   ImagePreview({
     show: true,
-    images: items.value.map((item) => ({ src: item.url })),
-    initNo: index,
+    images: imageItems.value.map((candidate) => ({ src: candidate.url })),
+    initNo: imageIndex,
     contentClose: true,
     closeable: true,
-    isLoop: items.value.length > 1,
+    isLoop: imageItems.value.length > 1,
     maxZoom: 4,
   })
 }
@@ -41,20 +63,21 @@ function openPreview(event: MouseEvent, index: number) {
   <div
     v-if="items.length"
     class="rf-post-media-grid"
-    :class="[layoutClass, { compact, interactive: preview }]"
-    :aria-label="`帖子图片，共 ${items.length} 张`"
+    :class="[layoutClass, { compact, interactive: preview && imageItems.length }]"
+    :aria-label="`帖子媒体，共 ${items.length} 个`"
   >
     <component
-      :is="preview ? 'button' : 'div'"
+      :is="isImage(item) && preview ? 'button' : 'div'"
       v-for="(item, index) in items"
       :key="item.id || item.url"
       class="rf-post-media-item"
-      :type="preview ? 'button' : undefined"
-      :aria-label="preview ? `预览第 ${index + 1} 张图片` : undefined"
+      :type="isImage(item) && preview ? 'button' : undefined"
+      :aria-label="isImage(item) && preview ? `预览第 ${index + 1} 张图片` : isVideo(item) ? `第 ${index + 1} 个视频` : undefined"
       :style="items.length === 1 ? { aspectRatio: ratio(item) } : undefined"
       @click="openPreview($event, index)"
     >
-      <nut-image :src="item.url" fit="cover" position="center" lazy-load>
+      <video v-if="isVideo(item)" :src="item.url" controls playsinline preload="metadata" @click.stop @pointerdown.stop />
+      <nut-image v-else :src="item.url" fit="cover" position="center" lazy-load>
         <template #loading><span class="rf-media-loading" /></template>
         <template #error><span class="rf-media-error">图片加载失败</span></template>
       </nut-image>
@@ -87,10 +110,12 @@ function openPreview(event: MouseEvent, index: number) {
   cursor: zoom-in;
 }
 .rf-post-media-item :deep(.nut-image),
-.rf-post-media-item :deep(.nut-img) {
+.rf-post-media-item :deep(.nut-img),
+.rf-post-media-item video {
   width: 100%;
   height: 100%;
 }
+.rf-post-media-item video { display: block; object-fit: contain; background: #000; }
 .rf-post-media-item :deep(img) {
   width: 100%;
   height: 100%;

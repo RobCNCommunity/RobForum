@@ -201,45 +201,68 @@ func lockConversationMembers(tx *sql.Tx, userID, conversationID int64) (string, 
 	return kind, members, nil
 }
 
-func (s *Store) DeleteComment(actorID int64, admin bool, commentID int64) error {
+func (s *Store) DeleteComment(actorID int64, admin bool, commentID int64) ([]string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 	var authorID, postID int64
 	var status string
 	if err := tx.QueryRow(`SELECT author_id, post_id, status FROM comments WHERE id = ? FOR UPDATE`, commentID).Scan(&authorID, &postID, &status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("评论不存在")
+			return nil, errors.New("评论不存在")
 		}
-		return err
+		return nil, err
 	}
 	if status != "published" {
-		return errors.New("评论已删除")
+		return nil, errors.New("评论已删除")
 	}
 	if !admin && actorID != authorID {
-		return errors.New("只能删除自己的评论")
+		return nil, errors.New("只能删除自己的评论")
+	}
+	rows, err := tx.Query(`SELECT stored_name FROM comment_media WHERE comment_id = ? ORDER BY id FOR UPDATE`, commentID)
+	if err != nil {
+		return nil, err
+	}
+	storedNames := make([]string, 0)
+	for rows.Next() {
+		var storedName string
+		if err := rows.Scan(&storedName); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		storedNames = append(storedNames, storedName)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if _, err := tx.Exec(`UPDATE comments SET status = 'deleted' WHERE id = ?`, commentID); err != nil {
-		return err
+		return nil, err
 	}
 	postUpdate, err := tx.Exec(`UPDATE posts SET comment_count = GREATEST(comment_count - 1, 0), updated_at = ? WHERE id = ?`, time.Now().UTC(), postID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if affected, err := postUpdate.RowsAffected(); err != nil || affected != 1 {
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return errors.New("post comment count update failed")
+		return nil, errors.New("post comment count update failed")
 	}
 	if admin && actorID != authorID {
 		if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'comment', ?, 'delete', '', ?)`, actorID, commentID, time.Now().UTC()); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return storedNames, nil
 }
 
 func (s *Store) TogglePostLike(userID, postID int64) (bool, int64, error) {

@@ -220,7 +220,6 @@ type Post struct {
 	AuthorMembershipTierID  int64       `json:"author_membership_tier_id,omitempty"`
 	Title                   string      `json:"title"`
 	Content                 string      `json:"content"`
-	PostType                string      `json:"post_type"`
 	Status                  string      `json:"status"`
 	Pinned                  bool        `json:"pinned"`
 	Featured                bool        `json:"featured"`
@@ -231,6 +230,7 @@ type Post struct {
 	Liked                   bool        `json:"liked"`
 	Bookmarked              bool        `json:"bookmarked"`
 	Reposted                bool        `json:"reposted"`
+	Tags                    []string    `json:"tags,omitempty"`
 	Media                   []PostMedia `json:"media,omitempty"`
 	CreatedAt               time.Time   `json:"created_at"`
 	UpdatedAt               time.Time   `json:"updated_at"`
@@ -248,6 +248,7 @@ type PostMedia struct {
 type Comment struct {
 	ID                      int64       `json:"id"`
 	PostID                  int64       `json:"post_id"`
+	ParentID                *int64      `json:"parent_id,omitempty"`
 	AuthorID                int64       `json:"author_id"`
 	AuthorName              string      `json:"author_name"`
 	AuthorAvatar            string      `json:"author_avatar"`
@@ -319,7 +320,6 @@ type UserSearchResult struct {
 type CommunitySearchResult struct {
 	Query     string             `json:"query"`
 	Posts     []Post             `json:"posts"`
-	Guides    []Post             `json:"guides"`
 	Resources []Resource         `json:"resources"`
 	Users     []UserSearchResult `json:"users"`
 }

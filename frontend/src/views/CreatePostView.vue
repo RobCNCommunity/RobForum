@@ -1,35 +1,38 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
 import { createPost, errorMessage, fetchBoards, type Board } from '@/api'
 import PageContainer from '@/components/PageContainer.vue'
 import AppIcon from '@/components/AppIcon.vue'
-import { postTypes } from '@/postTypes'
+import UserAvatar from '@/components/UserAvatar.vue'
+import { useAuthStore } from '@/stores/auth'
 
-interface UploadItem {
-  name?: string
-  type?: string
-  url?: string
-  formData?: FormData
+interface SelectedMedia {
+  file: File
+  url: string
 }
 
 const router = useRouter()
+const auth = useAuthStore()
 const formRef = ref<{ validate: () => Promise<unknown> } | null>(null)
 const boards = ref<Board[]>([])
-const fileList = ref<UploadItem[]>([])
+const mediaInput = ref<HTMLInputElement | null>(null)
+const media = ref<SelectedMedia[]>([])
+const tags = ref<string[]>([])
+const tagDraft = ref('')
+const isMobile = ref(false)
 const loading = ref(false)
 const form = reactive({
   board_id: undefined as number | undefined,
   title: '',
-  post_type: 'discussion',
   content: '',
 })
+let mobileQuery: MediaQueryList | undefined
 
-const selectedCount = computed(() => fileList.value.length)
+const selectedCount = computed(() => media.value.length)
 const rules = {
   title: [
-    { required: true, message: '请输入标题' },
     { max: 180, message: '标题不能超过 180 个字符' },
   ],
   content: [
@@ -38,48 +41,92 @@ const rules = {
   ],
 }
 
-onMounted(async () => {
-  try {
-    boards.value = await fetchBoards()
-  } catch (error) {
-    Notify.danger(errorMessage(error, '板块加载失败'))
-  }
-})
-
-async function beforeUpload(files: FileList | File[]) {
-  const accepted = Array.from(files).filter((file) => {
-    const extensionOK = /\.(png|jpe?g)$/i.test(file.name)
-    const typeOK = file.type === 'image/png' || file.type === 'image/jpeg'
-    return extensionOK && typeOK
-  })
-  if (accepted.length !== files.length) Notify.warn('仅支持 PNG 和 JPG 图片')
-  return accepted
+function updateMobile(event: MediaQueryListEvent | MediaQueryList) {
+  isMobile.value = event.matches
 }
 
-function selectedFiles() {
-  return fileList.value
-    .map((item) => item.formData?.get('files'))
-    .filter((item): item is File => item instanceof File)
+function isVideo(file: File) {
+  return file.type.startsWith('video/')
+}
+
+function chooseMedia(event: Event) {
+  const input = event.target as HTMLInputElement
+  const remaining = 4 - media.value.length
+  const candidates = Array.from(input.files || []).slice(0, Math.max(0, remaining))
+  if ((input.files?.length || 0) > remaining) Notify.warn('每篇帖子最多上传 4 个媒体文件')
+  for (const file of candidates) {
+    const image = ['image/png', 'image/jpeg'].includes(file.type) && /\.(png|jpe?g)$/i.test(file.name)
+    const video = ['video/mp4', 'video/webm'].includes(file.type) && /\.(mp4|webm)$/i.test(file.name)
+    const withinLimit = image ? file.size <= 5 * 1024 * 1024 : video && file.size <= 50 * 1024 * 1024
+    if (!withinLimit) {
+      Notify.warn('仅支持 PNG/JPG（5 MB 内）或 MP4/WebM（50 MB 内）')
+      continue
+    }
+    media.value.push({ file, url: URL.createObjectURL(file) })
+  }
+  input.value = ''
+}
+
+function removeMedia(index: number) {
+  const item = media.value[index]
+  if (item) URL.revokeObjectURL(item.url)
+  media.value.splice(index, 1)
+}
+
+function addTag() {
+  const value = tagDraft.value.trim().replace(/^#+/, '').toLocaleLowerCase()
+  if (!value) return
+  if (tags.value.length >= 5) {
+    Notify.warn('每篇帖子最多添加 5 个标签')
+    return
+  }
+  if ([...value].length > 24 || /[\s#]/u.test(value)) {
+    Notify.warn('标签不能包含空格或 #，且不能超过 24 个字符')
+    return
+  }
+  if (!tags.value.includes(value)) tags.value.push(value)
+  tagDraft.value = ''
+}
+
+function removeTag(index: number) {
+  tags.value.splice(index, 1)
+}
+
+function handleTagKeydown(event: KeyboardEvent) {
+  if (!['Enter', ',', '，'].includes(event.key)) return
+  event.preventDefault()
+  addTag()
 }
 
 async function submit() {
-  if (!form.board_id) {
-    Notify.warn('请选择板块')
-    return
-  }
-  try {
-    await formRef.value?.validate()
-  } catch {
-    return
-  }
+  if (loading.value) return
   loading.value = true
   try {
+    if (!form.board_id) {
+      Notify.warn('请选择板块')
+      return
+    }
+    if (!form.content.trim()) {
+      Notify.warn('请输入正文')
+      return
+    }
+    if ([...form.title].length > 180 || [...form.content].length > 50000) {
+      Notify.warn('标题或正文超过长度限制')
+      return
+    }
+    if (formRef.value) {
+      try {
+        await formRef.value.validate()
+      } catch {
+        return
+      }
+    }
     const post = await createPost({
       board_id: form.board_id,
       title: form.title.trim(),
-      post_type: form.post_type,
       content: form.content.trim(),
-      files: selectedFiles(),
+      tags: tags.value,
+      files: media.value.map((item) => item.file),
     })
     if (post.status === 'pending') {
       Notify.success('帖子已提交审核，审核通过后会公开显示')
@@ -94,11 +141,70 @@ async function submit() {
     loading.value = false
   }
 }
+
+onMounted(async () => {
+  mobileQuery = window.matchMedia('(max-width: 640px)')
+  updateMobile(mobileQuery)
+  mobileQuery.addEventListener('change', updateMobile)
+  try {
+    boards.value = await fetchBoards()
+  } catch (error) {
+    Notify.danger(errorMessage(error, '板块加载失败'))
+  }
+})
+
+onBeforeUnmount(() => {
+  mobileQuery?.removeEventListener('change', updateMobile)
+  media.value.forEach((item) => URL.revokeObjectURL(item.url))
+})
 </script>
 
 <template>
-  <PageContainer title="发布帖子">
-    <section class="rf-create-post">
+  <PageContainer>
+    <section v-if="isMobile" class="rf-mobile-composer">
+      <header>
+        <button type="button" class="rf-icon-button" aria-label="取消发布" :disabled="loading" @click="router.back()"><AppIcon name="back" size="21" /></button>
+        <strong>新帖子</strong>
+        <button type="button" class="rf-mobile-publish" :disabled="loading || !form.board_id || !form.content.trim()" @click="submit">{{ loading ? '发布中' : '发布' }}</button>
+      </header>
+
+      <label class="rf-mobile-board">
+        <AppIcon name="category" size="17" />
+        <select v-model="form.board_id" required aria-label="选择板块">
+          <option :value="undefined" disabled>选择发布板块</option>
+          <option v-for="board in boards" :key="board.id" :value="board.id">{{ board.name }}</option>
+        </select>
+        <AppIcon name="chevron" size="16" />
+      </label>
+
+      <div class="rf-mobile-editor">
+        <UserAvatar :src="auth.user?.avatar_url" :name="auth.user?.display_name" :size="40" />
+        <div>
+          <input v-model="form.title" maxlength="180" placeholder="添加标题（可选）" aria-label="帖子标题，可选" />
+          <textarea v-model="form.content" rows="9" maxlength="50000" autofocus placeholder="分享你的想法" aria-label="帖子正文" />
+        </div>
+      </div>
+
+      <div v-if="tags.length" class="rf-tag-list" aria-label="已添加标签">
+        <button v-for="(tag, index) in tags" :key="tag" type="button" :aria-label="`移除标签 ${tag}`" @click="removeTag(index)">#{{ tag }}<AppIcon name="close" size="13" /></button>
+      </div>
+      <div v-if="media.length" class="rf-selected-media">
+        <figure v-for="(item, index) in media" :key="item.url">
+          <video v-if="isVideo(item.file)" :src="item.url" controls playsinline preload="metadata" />
+          <img v-else :src="item.url" alt="待上传图片" />
+          <button type="button" aria-label="移除媒体" @click="removeMedia(index)"><AppIcon name="close" size="16" /></button>
+        </figure>
+      </div>
+
+      <footer class="rf-mobile-tools">
+        <label title="添加图片或视频" aria-label="添加图片或视频"><AppIcon name="photo" size="21" /><input ref="mediaInput" type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple @change="chooseMedia" /></label>
+        <label class="rf-mobile-tag-input"><AppIcon name="tag" size="19" /><input v-model="tagDraft" maxlength="25" placeholder="添加标签" @keydown="handleTagKeydown" /><button v-if="tagDraft" type="button" aria-label="确认添加标签" @click="addTag"><AppIcon name="add" size="17" /></button></label>
+        <span>{{ selectedCount }}/4</span>
+      </footer>
+    </section>
+
+    <section v-else class="rf-create-post">
+      <header class="rf-create-heading"><h1>发布帖子</h1></header>
       <nut-form ref="formRef" :model-value="form" :rules="rules" class="rf-create-form">
         <nut-form-item label="板块" required>
           <select v-model="form.board_id" class="rf-board-select" required aria-label="选择板块">
@@ -106,61 +212,31 @@ async function submit() {
             <option v-for="board in boards" :key="board.id" :value="board.id">{{ board.name }}</option>
           </select>
         </nut-form-item>
-
-        <nut-form-item label="类型" required>
-          <div class="rf-post-type-options" role="radiogroup" aria-label="帖子类型">
-            <button
-              v-for="item in postTypes"
-              :key="item.value"
-              type="button"
-              role="radio"
-              :aria-checked="form.post_type === item.value"
-              :class="{ selected: form.post_type === item.value }"
-              @click="form.post_type = item.value"
-            >
-              <span><AppIcon :name="item.icon" size="18" /></span>
-              <div><strong>{{ item.label }}</strong><small>{{ item.description }}</small></div>
-            </button>
-          </div>
-        </nut-form-item>
-
         <nut-form-item label="标题" prop="title">
-          <input v-model="form.title" class="rf-create-title-input" maxlength="180" placeholder="填写标题" />
+          <input v-model="form.title" class="rf-create-title-input" maxlength="180" placeholder="标题（可选）" />
         </nut-form-item>
-
         <nut-form-item label="正文" prop="content" class="rf-content-item">
-          <nut-textarea
-            v-model="form.content"
-            :rows="12"
-            :max-length="50000"
-            limit-show
-            placeholder="分享你的想法"
-          />
+          <nut-textarea v-model="form.content" :rows="9" :max-length="50000" limit-show placeholder="分享你的想法" />
         </nut-form-item>
-
-        <nut-form-item class="rf-upload-item">
-          <div class="rf-upload-head">
-            <strong>图片</strong>
-            <span>{{ selectedCount }}/4</span>
+        <nut-form-item label="标签">
+          <div class="rf-tag-editor">
+            <div v-if="tags.length" class="rf-tag-list"><button v-for="(tag, index) in tags" :key="tag" type="button" :aria-label="`移除标签 ${tag}`" @click="removeTag(index)">#{{ tag }}<AppIcon name="close" size="13" /></button></div>
+            <div class="rf-tag-control"><AppIcon name="tag" size="17" /><input v-model="tagDraft" maxlength="25" placeholder="输入标签后按回车" @keydown="handleTagKeydown" /><button type="button" :disabled="!tagDraft.trim()" @click="addTag">添加</button><span>{{ tags.length }}/5</span></div>
           </div>
-          <nut-uploader
-            v-model:file-list="fileList"
-            name="files"
-            accept="image/png,image/jpeg"
-            multiple
-            :maximum="4"
-            :maximize="5 * 1024 * 1024"
-            :auto-upload="false"
-            :before-upload="beforeUpload"
-            @oversize="Notify.warn('单张图片不能超过 5 MB')"
-          />
+        </nut-form-item>
+        <nut-form-item class="rf-upload-item">
+          <div class="rf-upload-head"><strong>图片和视频</strong><span>{{ selectedCount }}/4</span></div>
+          <div v-if="media.length" class="rf-selected-media">
+            <figure v-for="(item, index) in media" :key="item.url">
+              <video v-if="isVideo(item.file)" :src="item.url" controls playsinline preload="metadata" />
+              <img v-else :src="item.url" alt="待上传图片" />
+              <button type="button" aria-label="移除媒体" @click="removeMedia(index)"><AppIcon name="close" size="16" /></button>
+            </figure>
+          </div>
+          <label class="rf-media-picker"><AppIcon name="upload" size="19" /><span>选择图片或视频</span><input ref="mediaInput" type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple @change="chooseMedia" /></label>
         </nut-form-item>
       </nut-form>
-
-      <footer class="rf-create-actions">
-        <nut-button plain type="default" :disabled="loading" @click="router.back()">取消</nut-button>
-        <nut-button type="primary" :loading="loading" @click="submit">发布</nut-button>
-      </footer>
+      <footer class="rf-create-actions"><nut-button plain type="default" :disabled="loading" @click="router.back()">取消</nut-button><nut-button type="primary" :loading="loading" @click="submit">发布</nut-button></footer>
     </section>
   </PageContainer>
 </template>
@@ -195,15 +271,6 @@ async function submit() {
   background: var(--rf-bg);
 }
 .rf-board-select option { color: var(--rf-text); background: var(--rf-bg); }
-.rf-post-type-options { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.rf-post-type-options > button { display: grid; min-width: 0; min-height: 58px; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--rf-line); border-radius: 8px; color: var(--rf-text); background: var(--rf-bg); text-align: left; transition: border-color .16s ease, background-color .16s ease, color .16s ease; }
-.rf-post-type-options > button:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--rf-line)); background: var(--rf-bg-hover); }
-.rf-post-type-options > button.selected { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--rf-bg)); box-shadow: inset 0 0 0 1px var(--primary); }
-.rf-post-type-options > button > span { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: var(--rf-bg-subtle); }
-.rf-post-type-options > button.selected > span { background: color-mix(in srgb, var(--primary) 13%, var(--rf-bg)); }
-.rf-post-type-options > button > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.rf-post-type-options strong { font-size: 14px; }
-.rf-post-type-options small { overflow: hidden; color: var(--rf-muted); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .rf-content-item :deep(.nut-form-item__body) { align-items: flex-start; }
 .rf-content-item :deep(.nut-textarea) { overflow: hidden; padding: 12px 12px 32px !important; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg-subtle) !important; }
 .rf-content-item :deep(.nut-textarea__textarea) { min-height: 220px; color: var(--rf-text) !important; background: transparent !important; line-height: 1.65; resize: vertical; }
@@ -235,14 +302,51 @@ async function submit() {
   .rf-create-form :deep(input),
   .rf-create-form :deep(textarea),
   .rf-board-select { width: 100%; min-width: 0; font-size: 16px; }
-  .rf-post-type-options { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .rf-post-type-options > button { min-height: 50px; grid-template-columns: 28px minmax(0, 1fr); padding: 7px 8px; }
-  .rf-post-type-options > button > span { width: 28px; height: 28px; }
-  .rf-post-type-options small { display: none; }
   .rf-upload-item :deep(.nut-uploader) { width: 100%; }
   .rf-upload-item :deep(.nut-uploader__preview-list) { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .rf-content-item :deep(.nut-textarea__textarea) { min-height: 180px; }
   .rf-create-actions { position: static; padding: 18px 0 8px; background: transparent; }
   .rf-create-actions .nut-button { flex: 1; }
+}
+.rf-create-heading { min-height: 62px; padding: 16px 0 10px; border-bottom: 1px solid var(--rf-line); }
+.rf-create-heading h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
+.rf-tag-editor { width: 100%; min-width: 0; }
+.rf-tag-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.rf-tag-list button { display: inline-flex; min-height: 30px; align-items: center; gap: 4px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--rf-line)); border-radius: var(--rf-pill); color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--rf-bg)); font-size: 12px; }
+.rf-tag-list button:hover { background: color-mix(in srgb, var(--primary) 12%, var(--rf-bg)); }
+.rf-tag-control { display: grid; min-height: 42px; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; margin-top: 9px; padding: 0 10px; border: 1px solid var(--rf-line); border-radius: 8px; color: var(--rf-muted); background: var(--rf-bg-subtle); }
+.rf-tag-control input { min-width: 0; height: 40px; border: 0; outline: 0; color: var(--rf-text); background: transparent; }
+.rf-tag-control button { min-height: 30px; padding: 0 10px; border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-size: 12px; font-weight: 700; }
+.rf-tag-control button:disabled { opacity: .45; }
+.rf-tag-control > span { font-size: 11px; font-variant-numeric: tabular-nums; }
+.rf-selected-media { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.rf-selected-media figure { position: relative; aspect-ratio: 16 / 10; margin: 0; overflow: hidden; border: 1px solid var(--rf-line); border-radius: 8px; background: #000; }
+.rf-selected-media img, .rf-selected-media video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.rf-selected-media figure > button { position: absolute; top: 6px; right: 6px; display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: #fff; background: rgba(15, 20, 25, .74); }
+.rf-media-picker { display: inline-flex; min-height: 42px; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--rf-line); border-radius: 8px; color: var(--primary); background: var(--rf-bg); cursor: pointer; font-weight: 650; }
+.rf-media-picker:hover { background: var(--rf-bg-hover); }
+.rf-media-picker input, .rf-mobile-tools input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.rf-mobile-composer { position: relative; display: flex; min-height: calc(100dvh - var(--rf-mobile-bottom-nav)); flex-direction: column; background: var(--rf-bg); }
+.rf-mobile-composer > header { position: sticky; top: 0; z-index: 5; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 92%, transparent); backdrop-filter: blur(12px); }
+.rf-mobile-composer > header strong { justify-self: center; font-size: 17px; }
+.rf-mobile-publish { min-width: 66px; min-height: 36px; padding: 0 14px; border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-size: 13px; font-weight: 700; }
+.rf-mobile-publish:disabled { cursor: not-allowed; opacity: .45; }
+.rf-mobile-board { display: grid; min-height: 48px; grid-template-columns: 20px minmax(0, 1fr) 16px; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--rf-line); color: var(--primary); }
+.rf-mobile-board select { width: 100%; height: 46px; border: 0; outline: 0; color: var(--rf-text); background: transparent; font-size: 15px; font-weight: 650; appearance: none; }
+.rf-mobile-editor { display: grid; flex: 1; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 10px; padding: 14px; }
+.rf-mobile-editor > div { min-width: 0; }
+.rf-mobile-editor input { width: 100%; height: 40px; padding: 0; border: 0; border-bottom: 1px solid var(--rf-line); outline: 0; color: var(--rf-text); background: transparent; font-size: 17px; font-weight: 650; }
+.rf-mobile-editor textarea { display: block; width: 100%; min-height: 210px; padding: 12px 0; border: 0; outline: 0; color: var(--rf-text); background: transparent; font-size: 18px; line-height: 1.55; resize: none; }
+.rf-mobile-composer > .rf-tag-list, .rf-mobile-composer > .rf-selected-media { margin: 0; padding: 0 14px 10px 64px; }
+.rf-mobile-tools { position: sticky; bottom: var(--rf-mobile-bottom-nav); z-index: 4; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 12px; border-top: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 94%, transparent); backdrop-filter: blur(12px); }
+.rf-mobile-tools > label:first-child { display: inline-grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: var(--primary); cursor: pointer; }
+.rf-mobile-tools > label:first-child:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.rf-mobile-tag-input { display: grid; min-width: 0; height: 40px; grid-template-columns: 20px minmax(0, 1fr) 30px; align-items: center; gap: 5px; padding: 0 8px; border-radius: var(--rf-pill); color: var(--rf-muted); background: var(--rf-bg-subtle); }
+.rf-mobile-tag-input input { min-width: 0; height: 38px; border: 0; outline: 0; color: var(--rf-text); background: transparent; font-size: 14px; }
+.rf-mobile-tag-input button { display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: #fff; background: var(--primary); }
+.rf-mobile-tools > span { min-width: 30px; color: var(--rf-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+@media (max-width: 380px) {
+  .rf-mobile-editor { padding-inline: 10px; }
+  .rf-mobile-composer > .rf-tag-list, .rf-mobile-composer > .rf-selected-media { padding-left: 60px; padding-right: 10px; }
 }
 </style>

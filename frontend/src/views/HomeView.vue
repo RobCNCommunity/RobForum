@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { InfiniteLoading } from '@nutui/nutui'
+import { InfiniteLoading, Notify } from '@nutui/nutui'
 import {
   errorMessage,
   fetchAds,
@@ -10,19 +10,17 @@ import {
   fetchNotices,
   fetchPostsPage,
   fetchRecommendedPostsPage,
+  togglePostLike,
   type AdSlot,
   type Board,
   type Notice,
   type Post,
 } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import FeedPostRow from '@/components/FeedPostRow.vue'
 import PageContainer from '@/components/PageContainer.vue'
-import VerifiedBadge from '@/components/VerifiedBadge.vue'
-import MembershipBadge from '@/components/MembershipBadge.vue'
 import AppIcon from '@/components/AppIcon.vue'
-import PostMediaGrid from '@/components/PostMediaGrid.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
-import { postTypeLabel } from '@/postTypes'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,6 +39,7 @@ const noticeOpen = ref(false)
 const feedMode = ref<'for-you' | 'following'>('for-you')
 const activeAdIndex = ref(0)
 const carouselPaused = ref(false)
+const likingPostIDs = ref<number[]>([])
 let adTimer: number | undefined
 let feedRequestVersion = 0
 
@@ -174,6 +173,41 @@ function excerpt(value: string) {
   return text.length > 150 ? `${text.slice(0, 150)}...` : text
 }
 
+async function likePost(item: Post) {
+  if (!auth.user) {
+    await router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  if (likingPostIDs.value.includes(item.id)) return
+  likingPostIDs.value = [...likingPostIDs.value, item.id]
+  try {
+    Object.assign(item, await togglePostLike(item.id))
+  } catch (cause) {
+    Notify.danger(errorMessage(cause, '点赞失败'))
+  } finally {
+    likingPostIDs.value = likingPostIDs.value.filter((id) => id !== item.id)
+  }
+}
+
+function openPostMedia(item: Post, index: number) {
+  router.push({ path: `/posts/${item.id}`, query: { media: String(index) } })
+}
+
+async function sharePost(item: Post) {
+  const url = new URL(`/posts/${item.id}`, window.location.origin).href
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: item.title || excerpt(item.content), url })
+      return
+    }
+    await navigator.clipboard.writeText(url)
+    Notify.success('帖子链接已复制')
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') return
+    Notify.warn('分享失败，请打开帖子后复制地址')
+  }
+}
+
 watch(() => route.params.slug, () => { load() })
 watch(feedMode, load)
 watch(() => auth.user?.id, () => {
@@ -280,7 +314,7 @@ onBeforeUnmount(stopAdTimer)
       <div class="rf-section-label"><span>置顶帖子</span><AppIcon name="notice" size="16" /></div>
       <RouterLink v-for="post in pinnedPosts" :key="`p-${post.id}`" :to="`/posts/${post.id}`" class="rf-pinned-row">
         <span class="rf-pin-label">置顶</span>
-        <strong>{{ post.title }}</strong>
+        <strong>{{ post.title || excerpt(post.content) }}</strong>
         <small>{{ post.board_name }}</small>
       </RouterLink>
     </section>
@@ -316,33 +350,15 @@ onBeforeUnmount(stopAdTimer)
       @refresh="refreshFeed"
     >
       <section class="rf-timeline">
-        <RouterLink v-for="post in normalPosts" :key="post.id" :to="`/posts/${post.id}`" class="rf-post-row">
-        <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" />
-        <div class="rf-post-body">
-          <div class="rf-post-meta">
-            <strong>{{ post.author_name }}</strong>
-            <VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /><MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" />
-            <span>@{{ post.author_id }}</span>
-            <span>·</span>
-            <time>{{ formatDate(post.created_at) }}</time>
-            <span class="rf-post-more"><AppIcon name="more" size="17" /></span>
-          </div>
-          <div class="rf-post-type">
-            <span v-if="post.featured">精华</span>
-            <span>{{ postTypeLabel(post.post_type) }}</span>
-            <em>{{ post.board_name }}</em>
-          </div>
-          <h2>{{ post.title }}</h2>
-          <p v-if="excerpt(post.content)">{{ excerpt(post.content) }}</p>
-          <PostMediaGrid v-if="post.media?.length" :media="post.media" compact :preview="false" />
-          <div class="rf-post-actions" aria-label="帖子互动数据">
-            <span><AppIcon name="message" size="17" />{{ post.comment_count }}</span>
-            <span :class="{ reposted: post.reposted }"><AppIcon name="repost" size="17" />{{ post.repost_count || 0 }}</span>
-            <span :class="{ liked: post.liked }"><AppIcon name="heart" size="17" />{{ post.like_count || 0 }}</span>
-            <span><AppIcon name="share" size="17" /></span>
-          </div>
-        </div>
-        </RouterLink>
+        <FeedPostRow
+          v-for="post in normalPosts"
+          :key="post.id"
+          :post="post"
+          :liking="likingPostIDs.includes(post.id)"
+          @like="likePost"
+          @open-media="openPostMedia"
+          @share="sharePost"
+        />
 
         <div v-if="!normalPosts.length" class="rf-empty">
           <nut-empty description="这里还没有内容" />
@@ -391,9 +407,9 @@ onBeforeUnmount(stopAdTimer)
 .rf-feed-gate { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 36px 26px; text-align: center; }.rf-feed-gate-mark { display: grid; width: 48px; height: 48px; margin-bottom: 5px; place-items: center; border-radius: 50%; color: var(--primary); background: color-mix(in srgb, var(--primary) 11%, transparent); }.rf-feed-gate h2 { margin: 0; font-size: 21px; }.rf-feed-gate p { max-width: 32ch; margin: 0 0 12px; color: var(--rf-muted); line-height: 1.55; }
 .rf-feed-loading { display: flex; flex-direction: column; gap: 16px; padding: 18px 16px; }.rf-feed-loading :deep(.nut-skeleton) { padding: 0; }
 .rf-feed-infinite :deep(.nut-infinite-top) { color: var(--rf-muted); background: var(--rf-bg); }.rf-feed-infinite :deep(.nut-infinite-top .nut-icon) { color: var(--primary); }.rf-feed-more, .rf-feed-finished { display: flex; min-height: 54px; align-items: center; justify-content: center; gap: 8px; color: var(--rf-muted); font-size: 13px; }.rf-feed-finished { border-top: 1px solid var(--rf-line); }.rf-feed-more .rf-inline-spinner { width: 16px; height: 16px; border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent); border-top-color: var(--primary); border-radius: 50%; animation: rf-feed-spin .7s linear infinite; }@keyframes rf-feed-spin { to { transform: rotate(360deg); } }
-.rf-timeline { border-top: 1px solid var(--rf-line); }.rf-post-row { display: flex; gap: 12px; padding: 15px 16px 14px; border-bottom: 1px solid var(--rf-line); color: inherit; transition: background .16s ease; }.rf-post-row:hover { color: inherit; background: var(--rf-bg-hover); }.rf-post-body { min-width: 0; flex: 1; }.rf-post-meta { display: flex; min-width: 0; align-items: center; gap: 5px; color: var(--rf-muted); font-size: 13px; }.rf-post-meta strong { overflow: hidden; color: var(--rf-text); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }.rf-post-meta time { white-space: nowrap; }.rf-post-more { display: inline-grid; margin-left: auto; place-items: center; }.rf-post-type { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--rf-muted); font-size: 12px; }.rf-post-type span:first-child { color: var(--rf-danger); }.rf-post-type em { padding: 1px 6px; border-radius: var(--rf-pill); background: var(--rf-bg-subtle); font-style: normal; }.rf-post-body h2 { margin: 3px 0 4px; font-family: var(--rf-font-display); font-size: 17px; line-height: 1.35; }.rf-post-body p { display: -webkit-box; margin: 0 0 9px; overflow: hidden; color: var(--rf-muted); line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }.rf-post-actions { display: flex; align-items: center; justify-content: space-between; max-width: 440px; color: var(--rf-muted); font-size: 12px; }.rf-post-actions span { display: inline-flex; align-items: center; gap: 5px; }.rf-post-actions span:hover, .rf-post-actions .liked { color: var(--primary); }.rf-post-actions .reposted { color: var(--rf-success); }
+.rf-timeline { border-top: 1px solid var(--rf-line); }
 .rf-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 42px 20px; color: var(--rf-muted); text-align: center; }.rf-empty > span { color: var(--rf-muted); }.rf-empty .nut-empty { padding: 0; }.rf-empty .nut-button { margin-top: 8px; }
 .rf-notice-sheet { height: 100%; overflow-y: auto; padding: 22px 20px; background: var(--rf-bg); }.rf-notice-sheet header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }.rf-notice-sheet h2 { margin: 0; font-size: 20px; }.rf-notice-sheet article { padding: 16px 0; border-bottom: 1px solid var(--rf-line); }.rf-notice-sheet article div { display: flex; align-items: center; gap: 8px; }.rf-notice-sheet article b { color: var(--rf-danger); font-size: 12px; }.rf-notice-sheet article p { color: var(--rf-muted); white-space: pre-wrap; line-height: 1.6; }.rf-notice-sheet article time { color: var(--rf-faint); font-size: 12px; }
 @media (max-width: 1019px) { .rf-home-sticky { top: var(--rf-header); } .rf-home-titlebar { display: none; } .rf-home-mobile-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rf-line); } .rf-home-mobile-search :deep(.nut-searchbar) { min-width: 0; flex: 1; padding: 0; border-radius: var(--rf-pill); } .rf-home-mobile-search :deep(.nut-searchbar__search-input) { border-radius: var(--rf-pill); } .rf-home-mobile-search > .nut-button { flex: 0 0 auto; } }
-@media (max-width: 560px) { .rf-ad-carousel { height: 104px; }.rf-composer { display: none; }.rf-post-row { padding: 13px 12px; }.rf-post-meta time { display: none; }.rf-post-body h2 { font-size: 16px; }.rf-pinned-row { padding-inline: 12px; }.rf-section-label { padding-inline: 12px; }.rf-home-mobile-search { padding-inline: 10px; }.rf-feed-gate { min-height: 260px; }.rf-home-mobile-search .rf-home-notice { width: 36px; height: 36px; flex-basis: 36px; } }
+@media (max-width: 560px) { .rf-ad-carousel { height: 104px; }.rf-composer { display: none; }.rf-pinned-row { padding-inline: 12px; }.rf-section-label { padding-inline: 12px; }.rf-home-mobile-search { padding-inline: 10px; }.rf-feed-gate { min-height: 260px; }.rf-home-mobile-search .rf-home-notice { width: 36px; height: 36px; flex-basis: 36px; } }
 </style>

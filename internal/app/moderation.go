@@ -42,6 +42,7 @@ func (s *Server) updateAdminUserStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.removeResourceUploadFiles(resourceFiles)
+	s.reconcileDeletedCommunityMedia()
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -63,6 +64,7 @@ func (s *Server) deleteAdminUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.removeResourceUploadFiles(resourceFiles)
+	s.reconcileDeletedCommunityMedia()
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
@@ -133,6 +135,9 @@ func (s *Server) moderateAdminPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeModerationStoreError(w, r, err, "post_moderation_failed", "帖子处理失败")
 		return
+	}
+	if input.Status == "deleted" {
+		s.reconcileDeletedCommunityMedia()
 	}
 	writeJSON(w, http.StatusOK, item)
 }

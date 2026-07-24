@@ -20,10 +20,10 @@ import AppIcon from '@/components/AppIcon.vue'
 import ContentReportDialog from '@/components/ContentReportDialog.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import PostMediaGrid from '@/components/PostMediaGrid.vue'
+import PostTagList from '@/components/PostTagList.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
-import { postTypeLabel } from '@/postTypes'
 
 const route = useRoute()
 const router = useRouter()
@@ -268,9 +268,10 @@ onMounted(load)
                     <span class="rf-x-post-handle">{{ profileHandle }}</span><span>·</span><time>{{ formatTimelineDate(post.created_at) }}</time>
                     <span class="rf-x-post-more"><AppIcon name="more" size="18" /></span>
                   </div>
-                  <div class="rf-x-post-context">{{ post.board_name }} · {{ postTypeLabel(post.post_type) }}</div>
-                  <h2>{{ post.title }}</h2>
-                  <p v-if="post.content">{{ post.content }}</p>
+                  <div class="rf-x-post-context">{{ post.board_name }}</div>
+                  <PostTagList :tags="post.tags" compact class="rf-x-profile-post-tags" />
+                  <h2 v-if="post.title">{{ post.title }}</h2>
+                  <p v-if="post.content" :class="{ primary: !post.title }">{{ post.content }}</p>
                   <PostMediaGrid v-if="post.media?.length" :media="post.media" compact :preview="false" />
                   <div class="rf-x-post-actions" aria-label="帖子互动数据">
                     <span><AppIcon name="message" size="18" />{{ post.comment_count || 0 }}</span>
@@ -372,8 +373,10 @@ onMounted(load)
 .rf-x-post-handle { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rf-x-post-more { display: inline-flex; margin-left: auto; }
 .rf-x-post-context { margin: 1px 0 4px; color: var(--rf-muted); font-size: 12px; }
+.rf-x-profile-post-tags { margin: 5px 0; }
 .rf-x-post-body h2, .rf-x-resource-row h2 { margin: 0 0 3px; font-size: 16px; line-height: 1.35; overflow-wrap: anywhere; }
 .rf-x-post-body p, .rf-x-resource-row p { margin: 0 0 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rf-x-post-body p.primary { font-size: 16px; }
 .rf-x-post-actions { display: flex; max-width: 455px; align-items: center; justify-content: space-between; margin-top: 10px; color: var(--rf-muted); font-size: 12px; }
 .rf-x-post-actions span { display: inline-flex; min-width: 34px; align-items: center; gap: 6px; }
 .rf-x-post-actions span.active { color: var(--primary); }

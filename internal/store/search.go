@@ -14,7 +14,6 @@ func (s *Store) SearchCommunity(query string) (domain.CommunitySearchResult, err
 	result := domain.CommunitySearchResult{
 		Query:     query,
 		Posts:     make([]domain.Post, 0),
-		Guides:    make([]domain.Post, 0),
 		Resources: make([]domain.Resource, 0),
 		Users:     make([]domain.UserSearchResult, 0),
 	}
@@ -26,10 +25,7 @@ func (s *Store) SearchCommunity(query string) (domain.CommunitySearchResult, err
 	}
 
 	var err error
-	if result.Posts, err = s.SearchPosts(query, "posts", communitySearchLimit); err != nil {
-		return result, err
-	}
-	if result.Guides, err = s.SearchPosts(query, "guides", communitySearchLimit); err != nil {
+	if result.Posts, err = s.SearchPosts(query, communitySearchLimit); err != nil {
 		return result, err
 	}
 	if result.Resources, err = s.SearchPublicResources(query, communitySearchLimit); err != nil {

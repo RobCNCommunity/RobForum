@@ -335,7 +335,7 @@ func (s *Server) oauthCallbackURL(r *http.Request) string {
 		base = settings.PublicURL
 	}
 	if base == "" {
-		base = requestScheme(r) + "://" + r.Host
+		base = requestScheme(r, s.trustedProxies) + "://" + r.Host
 	}
 	return strings.TrimRight(base, "/") + "/api/v1/oauth/callback"
 }

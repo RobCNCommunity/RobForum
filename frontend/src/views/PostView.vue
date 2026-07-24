@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
 import {
@@ -24,13 +24,21 @@ import {
 } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
+import CommentComposer from '@/components/CommentComposer.vue'
+import CommentThreadItem from '@/components/CommentThreadItem.vue'
 import ContentReportDialog from '@/components/ContentReportDialog.vue'
 import PageContainer from '@/components/PageContainer.vue'
+import PostImageViewer from '@/components/PostImageViewer.vue'
 import PostMediaGrid from '@/components/PostMediaGrid.vue'
+import PostTagList from '@/components/PostTagList.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
-import { postTypeLabel } from '@/postTypes'
+import { buildCommentTree } from '@/commentTree'
+
+interface CommentComposerHandle {
+  focus: () => void
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -40,8 +48,9 @@ const comments = ref<Comment[]>([])
 const comment = ref('')
 const commentFiles = ref<File[]>([])
 const commentPreviewURLs = ref<string[]>([])
-const commentFileInput = ref<HTMLInputElement | null>(null)
-const replyInput = ref<HTMLTextAreaElement | null>(null)
+const replyComposer = ref<CommentComposerHandle | null>(null)
+const viewerReplyComposer = ref<CommentComposerHandle | null>(null)
+const replyingTo = ref<Comment | null>(null)
 const loading = ref(true)
 const pinning = ref(false)
 const sending = ref(false)
@@ -50,13 +59,23 @@ const bookmarking = ref(false)
 const reposting = ref(false)
 const busyCommentID = ref(0)
 const postMenuOpen = ref(false)
-const commentMenuID = ref(0)
 const reportTarget = ref<{ type: 'post' | 'comment'; id: number; label: string } | null>(null)
 const reporting = ref(false)
+const viewerOpen = ref(false)
+const viewerIndex = ref(0)
 
 const canPin = computed(() => auth.isAdmin)
 const authorHandle = computed(() => post.value ? `@user_${post.value.author_id}` : '')
 const reportOpen = computed(() => reportTarget.value !== null)
+const commentTree = computed(() => buildCommentTree(comments.value))
+const viewerMedia = computed(() => (post.value?.media || []).filter((item) => item.mime_type.startsWith('image/')))
+
+function requestedViewerIndex() {
+  const value = Array.isArray(route.query.media) ? route.query.media[0] : route.query.media
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null
+  const index = Number(value)
+  return Number.isSafeInteger(index) ? index : null
+}
 
 function formatPostDate(value: string) {
   const date = new Date(value)
@@ -70,16 +89,6 @@ function formatPostDate(value: string) {
   }).format(date)
 }
 
-function formatReplyDate(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const now = new Date()
-  const options: Intl.DateTimeFormatOptions = date.getFullYear() === now.getFullYear()
-    ? { month: 'numeric', day: 'numeric' }
-    : { year: 'numeric', month: 'numeric', day: 'numeric' }
-  return new Intl.DateTimeFormat('zh-CN', options).format(date)
-}
-
 function formatCount(value: number) {
   return new Intl.NumberFormat('zh-CN', { notation: value >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value || 0)
 }
@@ -87,7 +96,6 @@ function formatCount(value: number) {
 async function load() {
   loading.value = true
   postMenuOpen.value = false
-  commentMenuID.value = 0
   reportTarget.value = null
   try {
     const id = Number(route.params.id)
@@ -109,11 +117,21 @@ async function load() {
         if (state) Object.assign(item, state)
       }))
     }
+    const mediaIndex = requestedViewerIndex()
+    if (mediaIndex !== null) openImageViewer(mediaIndex)
   } catch (error) {
     Notify.danger(errorMessage(error, '帖子加载失败'))
     router.push('/')
   } finally {
     loading.value = false
+    await nextTick()
+    const targetID = route.hash === '#reply-composer'
+      ? 'reply-composer'
+      : /^#reply-\d+$/.test(route.hash) ? route.hash.slice(1) : ''
+    if (targetID) {
+      document.getElementById(targetID)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      if (targetID === 'reply-composer' && auth.user) replyComposer.value?.focus()
+    }
   }
 }
 
@@ -121,13 +139,38 @@ function requireLogin() {
   router.push({ path: '/login', query: { redirect: route.fullPath } })
 }
 
-function focusReply() {
+async function focusReply() {
   if (!auth.user) {
     requireLogin()
     return
   }
-  replyInput.value?.focus()
-  replyInput.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  replyingTo.value = null
+  await nextTick()
+  if (viewerOpen.value) {
+    viewerReplyComposer.value?.focus()
+    return
+  }
+  document.querySelector('#reply-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  replyComposer.value?.focus()
+}
+
+async function replyToComment(item: Comment) {
+  if (!auth.user) {
+    requireLogin()
+    return
+  }
+  replyingTo.value = item
+  await nextTick()
+  if (viewerOpen.value) {
+    viewerReplyComposer.value?.focus()
+    return
+  }
+  document.querySelector('#reply-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  replyComposer.value?.focus()
+}
+
+function cancelCommentReply() {
+  replyingTo.value = null
 }
 
 async function submitComment() {
@@ -135,9 +178,10 @@ async function submitComment() {
   if (!post.value || (!content && !commentFiles.value.length) || sending.value) return
   sending.value = true
   try {
-    comments.value.push(await createComment(post.value.id, content, commentFiles.value))
+    comments.value.push(await createComment(post.value.id, content, commentFiles.value, replyingTo.value?.id))
     comment.value = ''
     clearCommentFiles()
+    replyingTo.value = null
     post.value.comment_count += 1
     Notify.success('回复已发布')
   } catch (error) {
@@ -147,29 +191,40 @@ async function submitComment() {
   }
 }
 
-function chooseCommentFiles(event: Event) {
-  const files = Array.from((event.target as HTMLInputElement).files || [])
-  if (files.length > 4) Notify.warn('每条回复最多上传 4 张图片')
-  const limited = files.slice(0, 4)
-  const accepted = limited.filter((file) => file.size <= 5 * 1024 * 1024 && ['image/png', 'image/jpeg'].includes(file.type))
-  if (accepted.length !== limited.length) Notify.warn('回复图片仅支持 PNG/JPG，且单张不超过 5 MB')
-  commentPreviewURLs.value.forEach((url) => URL.revokeObjectURL(url))
-  commentFiles.value = accepted
-  commentPreviewURLs.value = accepted.map((file) => URL.createObjectURL(file))
+function chooseCommentFiles(files: File[]) {
+  const remaining = 4 - commentFiles.value.length
+  if (files.length > remaining) Notify.warn('每条回复最多上传 4 个媒体文件')
+  const candidates = files.slice(0, Math.max(0, remaining))
+  const accepted = candidates.filter((file) => {
+    const image = ['image/png', 'image/jpeg'].includes(file.type) && file.size <= 5 * 1024 * 1024
+    const video = ['video/mp4', 'video/webm'].includes(file.type) && file.size <= 50 * 1024 * 1024
+    return image || video
+  })
+  if (accepted.length !== candidates.length) Notify.warn('仅支持 PNG/JPG（5 MB 内）或 MP4/WebM（50 MB 内）')
+  commentFiles.value.push(...accepted)
+  commentPreviewURLs.value.push(...accepted.map((file) => URL.createObjectURL(file)))
 }
 
 function removeCommentFile(index: number) {
   URL.revokeObjectURL(commentPreviewURLs.value[index])
   commentFiles.value.splice(index, 1)
   commentPreviewURLs.value.splice(index, 1)
-  if (commentFileInput.value) commentFileInput.value.value = ''
 }
 
 function clearCommentFiles() {
   commentPreviewURLs.value.forEach((url) => URL.revokeObjectURL(url))
   commentFiles.value = []
   commentPreviewURLs.value = []
-  if (commentFileInput.value) commentFileInput.value.value = ''
+}
+
+function openImageViewer(index: number) {
+  if (!viewerMedia.value.length) return
+  viewerIndex.value = Math.min(Math.max(index, 0), viewerMedia.value.length - 1)
+  viewerOpen.value = true
+}
+
+function closeImageViewer() {
+  viewerOpen.value = false
 }
 
 async function togglePin() {
@@ -251,14 +306,6 @@ async function likeComment(item: Comment) {
   }
 }
 
-function canDelete(item: Comment) {
-  return !!auth.user && (auth.isAdmin || auth.user.id === item.author_id)
-}
-
-function canReport(item: Comment) {
-  return !auth.user || auth.user.id !== item.author_id
-}
-
 function openPostReport() {
   if (!post.value) return
   postMenuOpen.value = false
@@ -267,16 +314,16 @@ function openPostReport() {
     return
   }
   if (auth.user.id === post.value.author_id) return
-  reportTarget.value = { type: 'post', id: post.value.id, label: `帖子：${post.value.title}` }
+  reportTarget.value = { type: 'post', id: post.value.id, label: `帖子：${post.value.title || post.value.content.slice(0, 40)}` }
 }
 
 function openCommentReport(item: Comment) {
-  commentMenuID.value = 0
   if (!auth.user) {
     requireLogin()
     return
   }
   if (auth.user.id === item.author_id) return
+  if (viewerOpen.value) closeImageViewer()
   reportTarget.value = { type: 'comment', id: item.id, label: `回复：${item.author_name}` }
 }
 
@@ -297,12 +344,12 @@ async function submitReport(reason: string) {
 }
 
 async function removeComment(item: Comment) {
-  commentMenuID.value = 0
   if (!window.confirm('确定删除这条回复吗？')) return
   busyCommentID.value = item.id
   try {
     await deleteComment(item.id)
     comments.value = comments.value.filter((value) => value.id !== item.id)
+    if (replyingTo.value?.id === item.id) replyingTo.value = null
     if (post.value) post.value.comment_count = Math.max(0, post.value.comment_count - 1)
     Notify.success('回复已删除')
   } catch (error) {
@@ -325,7 +372,7 @@ async function sharePost() {
   if (!post.value) return
   try {
     if (navigator.share) {
-      await navigator.share({ title: post.value.title, url: window.location.href })
+      await navigator.share({ title: post.value.title || post.value.content.slice(0, 80), url: window.location.href })
       return
     }
     await copyLink()
@@ -335,15 +382,24 @@ async function sharePost() {
   }
 }
 
+function shareComment(item: Comment) {
+  return copyLink(`${window.location.origin}${route.path}#reply-${item.id}`)
+}
+
 function openModeration() {
   if (!post.value) return
   postMenuOpen.value = false
   router.push({ path: '/admin/posts', query: { post_id: post.value.id } })
 }
 
-watch(() => route.params.id, load)
+watch(() => route.params.id, () => {
+  if (viewerOpen.value) closeImageViewer()
+  load()
+})
 onMounted(load)
-onBeforeUnmount(clearCommentFiles)
+onBeforeUnmount(() => {
+  clearCommentFiles()
+})
 </script>
 
 <template>
@@ -390,12 +446,11 @@ onBeforeUnmount(clearCommentFiles)
             <span v-if="post.pinned">置顶</span>
             <span v-if="post.featured">精华</span>
             <span>{{ post.board_name }}</span>
-            <span>·</span>
-            <span>{{ postTypeLabel(post.post_type) }}</span>
           </div>
-          <h1>{{ post.title }}</h1>
+          <PostTagList :tags="post.tags" class="rf-x-status-tags" />
+          <h1 v-if="post.title">{{ post.title }}</h1>
           <div v-if="post.content" class="rf-x-status-content">{{ post.content }}</div>
-          <PostMediaGrid v-if="post.media?.length" :media="post.media" />
+          <PostMediaGrid v-if="post.media?.length" :media="post.media" custom-preview @open-preview="openImageViewer" />
 
           <div class="rf-x-status-date">
             <time>{{ formatPostDate(post.created_at) }}</time><span>·</span><strong>{{ formatCount(post.views) }}</strong><span>次浏览</span>
@@ -414,50 +469,110 @@ onBeforeUnmount(clearCommentFiles)
           </div>
         </article>
 
-        <form v-if="auth.user" class="rf-x-reply-composer" @submit.prevent="submitComment">
-          <UserAvatar :src="auth.user.avatar_url" :name="auth.user.display_name" :size="42" />
-          <div>
-            <textarea ref="replyInput" v-model="comment" rows="2" maxlength="5000" placeholder="发布你的回复" @keydown.ctrl.enter.prevent="submitComment" />
-            <div v-if="commentPreviewURLs.length" class="rf-comment-upload-previews"><figure v-for="(url, index) in commentPreviewURLs" :key="url"><img :src="url" alt="待发送图片" /><button type="button" aria-label="移除图片" @click="removeCommentFile(index)">×</button></figure></div>
-            <footer>
-              <label class="rf-comment-upload-button" aria-label="添加图片"><AppIcon name="photo" size="19" /><input ref="commentFileInput" type="file" accept="image/png,image/jpeg" multiple @change="chooseCommentFiles" /></label>
-              <span>{{ comment.length }}/5000</span>
-              <button type="submit" :disabled="(!comment.trim() && !commentFiles.length) || sending">{{ sending ? '发布中' : '回复' }}</button>
-            </footer>
-          </div>
-        </form>
-        <button v-else type="button" class="rf-x-reply-login" @click="requireLogin">登录后发布回复</button>
+        <CommentComposer
+          v-if="auth.user"
+          id="reply-composer"
+          ref="replyComposer"
+          v-model="comment"
+          :files="commentFiles"
+          :preview-urls="commentPreviewURLs"
+          :sending="sending"
+          :replying-to="replyingTo"
+          @submit="submitComment"
+          @select-files="chooseCommentFiles"
+          @remove-file="removeCommentFile"
+          @cancel-reply="cancelCommentReply"
+        />
+        <button v-else id="reply-composer" type="button" class="rf-x-reply-login" @click="requireLogin">登录后发布回复</button>
 
         <section class="rf-x-replies" aria-label="帖子回复">
-          <article v-for="item in comments" :id="`reply-${item.id}`" :key="item.id" class="rf-x-reply-row">
-            <RouterLink :to="`/users/${item.author_id}`" :aria-label="`查看 ${item.author_name} 的个人主页`">
-              <UserAvatar :src="item.author_avatar" :name="item.author_name" :size="40" />
-            </RouterLink>
-            <div class="rf-x-reply-body">
-              <div class="rf-x-reply-meta">
-                <RouterLink :to="`/users/${item.author_id}`"><strong>{{ item.author_name }}</strong></RouterLink>
-                <VerifiedBadge :verified="item.author_verified" :label="item.author_verification_label" /><MembershipBadge :active="item.author_member" :tier-id="item.author_membership_tier_id" />
-                <span>@user_{{ item.author_id }}</span><span>·</span><time>{{ formatReplyDate(item.created_at) }}</time>
-                <div v-if="canDelete(item) || canReport(item)" class="rf-x-reply-menu">
-                  <button type="button" aria-label="更多回复操作" :aria-expanded="commentMenuID === item.id" @click="commentMenuID = commentMenuID === item.id ? 0 : item.id"><AppIcon name="more" size="18" /></button>
-                  <Transition name="rf-x-menu">
-                    <div v-if="commentMenuID === item.id"><button v-if="canReport(item)" type="button" class="danger" :disabled="reporting" @click="openCommentReport(item)">举报回复</button><button v-if="canDelete(item)" type="button" class="danger" :disabled="busyCommentID === item.id" @click="removeComment(item)">删除回复</button></div>
-                  </Transition>
-                </div>
-              </div>
-              <p v-if="item.content">{{ item.content }}</p>
-              <PostMediaGrid v-if="item.media?.length" :media="item.media" compact />
-              <div class="rf-x-reply-actions">
-                <button type="button" aria-label="点赞回复" :class="{ liked: item.liked }" :disabled="busyCommentID === item.id" @click="likeComment(item)"><AppIcon name="heart" size="17" /><span>{{ formatCount(item.like_count) }}</span></button>
-                <button type="button" aria-label="复制回复链接" @click="copyLink(`${window.location.origin}${route.path}#reply-${item.id}`)"><AppIcon name="share" size="17" /></button>
-              </div>
-            </div>
-          </article>
+          <CommentThreadItem
+            v-for="node in commentTree"
+            :key="node.item.id"
+            :node="node"
+            :viewer-id="auth.user?.id || 0"
+            :viewer-is-admin="auth.isAdmin"
+            :busy-id="busyCommentID"
+            :replying-to-id="replyingTo?.id || 0"
+            @reply="replyToComment"
+            @like="likeComment"
+            @delete="removeComment"
+            @report="openCommentReport"
+            @share="shareComment"
+          />
           <div v-if="!comments.length" class="rf-x-replies-empty"><nut-empty description="还没有回复" /></div>
         </section>
       </template>
     </section>
     <ContentReportDialog :open="reportOpen" :target-label="reportTarget?.label || ''" :submitting="reporting" @close="reportTarget = null" @submit="submitReport" />
+    <PostImageViewer v-if="post" v-model:open="viewerOpen" :media="viewerMedia" :start-index="viewerIndex">
+      <header class="rf-viewer-author">
+        <RouterLink :to="`/users/${post.author_id}`" @click="closeImageViewer"><UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" /></RouterLink>
+        <div>
+          <RouterLink :to="`/users/${post.author_id}`" @click="closeImageViewer">
+            <strong>{{ post.author_name }}</strong>
+            <VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" />
+            <MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" />
+          </RouterLink>
+          <small>{{ authorHandle }} · {{ post.board_name }}</small>
+        </div>
+      </header>
+
+      <section class="rf-viewer-post-copy">
+        <PostTagList :tags="post.tags" compact class="rf-viewer-tags" />
+        <h2 v-if="post.title">{{ post.title }}</h2>
+        <p v-if="post.content">{{ post.content }}</p>
+        <time>{{ formatPostDate(post.created_at) }}</time>
+      </section>
+
+      <div class="rf-viewer-stats">
+        <span><strong>{{ formatCount(post.comment_count) }}</strong> 回复</span>
+        <span><strong>{{ formatCount(post.repost_count) }}</strong> 转发</span>
+        <span><strong>{{ formatCount(post.like_count) }}</strong> 喜欢</span>
+      </div>
+      <div class="rf-viewer-actions" role="group" aria-label="帖子操作">
+        <button type="button" aria-label="回复" @click="focusReply"><AppIcon name="message" size="20" /></button>
+        <button type="button" aria-label="转发" :class="{ reposted: post.reposted }" :disabled="reposting" :aria-pressed="post.reposted" @click="repostPost"><AppIcon name="repost" size="20" /></button>
+        <button type="button" aria-label="点赞" :class="{ liked: post.liked }" :disabled="likingPost" :aria-pressed="post.liked" @click="likePost"><AppIcon name="heart" size="20" /></button>
+        <button type="button" aria-label="收藏" :class="{ bookmarked: post.bookmarked }" :disabled="bookmarking" :aria-pressed="post.bookmarked" @click="bookmarkPost"><AppIcon name="star" size="20" /></button>
+        <button type="button" aria-label="分享" @click="sharePost"><AppIcon name="share" size="20" /></button>
+      </div>
+
+      <CommentComposer
+        v-if="auth.user"
+        ref="viewerReplyComposer"
+        v-model="comment"
+        compact
+        :files="commentFiles"
+        :preview-urls="commentPreviewURLs"
+        :sending="sending"
+        :replying-to="replyingTo"
+        @submit="submitComment"
+        @select-files="chooseCommentFiles"
+        @remove-file="removeCommentFile"
+        @cancel-reply="cancelCommentReply"
+      />
+      <button v-else type="button" class="rf-viewer-login" @click="requireLogin">登录后发布回复</button>
+
+      <section class="rf-viewer-comments" aria-label="帖子回复">
+        <CommentThreadItem
+          v-for="node in commentTree"
+          :key="node.item.id"
+          :node="node"
+          compact
+          :viewer-id="auth.user?.id || 0"
+          :viewer-is-admin="auth.isAdmin"
+          :busy-id="busyCommentID"
+          :replying-to-id="replyingTo?.id || 0"
+          @reply="replyToComment"
+          @like="likeComment"
+          @delete="removeComment"
+          @report="openCommentReport"
+          @share="shareComment"
+        />
+        <div v-if="!comments.length" class="rf-viewer-comments-empty">还没有回复</div>
+      </section>
+    </PostImageViewer>
   </PageContainer>
 </template>
 
@@ -481,6 +596,7 @@ onBeforeUnmount(clearCommentFiles)
 .rf-x-status-menu-panel button.danger { color: var(--rf-danger); }
 .rf-x-status-context { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 17px; color: var(--rf-muted); font-size: 13px; }
 .rf-x-status-context span:first-child { color: var(--primary); font-weight: 650; }
+.rf-x-status-tags { margin-top: 9px; }
 .rf-x-status-post h1 { margin: 8px 0 8px; font-size: 23px; line-height: 1.3; overflow-wrap: anywhere; }
 .rf-x-status-content { font-size: 18px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rf-x-status-date { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 15px; padding-bottom: 14px; color: var(--rf-muted); font-size: 14px; }
@@ -495,43 +611,8 @@ onBeforeUnmount(clearCommentFiles)
 .rf-x-status-actions button.reposted { color: var(--rf-success); }
 .rf-x-status-actions button.liked { color: #f91880; }
 .rf-x-status-actions button.bookmarked { color: var(--primary); }
-.rf-x-reply-composer { display: flex; gap: 11px; padding: 13px 16px 10px; border-bottom: 1px solid var(--rf-line); }
-.rf-x-reply-composer > div { min-width: 0; flex: 1; }
-.rf-x-reply-composer textarea { display: block; width: 100%; min-height: 58px; padding: 8px 0; border: 0; outline: 0; color: var(--rf-text); background: transparent; font-size: 18px; line-height: 1.45; resize: vertical; }
-.rf-x-reply-composer footer { display: flex; min-height: 38px; align-items: center; justify-content: flex-end; gap: 12px; border-top: 1px solid var(--rf-line); }
-.rf-x-reply-composer footer span { color: var(--rf-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.rf-x-reply-composer footer button { min-width: 68px; min-height: 34px; padding: 0 16px; border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-weight: 700; }
-.rf-x-reply-composer footer button:disabled { cursor: not-allowed; opacity: .45; }
-.rf-comment-upload-button { display: inline-grid; width: 34px; height: 34px; margin-right: auto; place-items: center; border-radius: 50%; color: var(--primary); cursor: pointer; transition: background-color 150ms ease-out; }
-.rf-comment-upload-button:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
-.rf-comment-upload-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
-.rf-comment-upload-previews { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; padding: 5px 0 10px; }
-.rf-comment-upload-previews figure { position: relative; aspect-ratio: 1 / 1; margin: 0; overflow: hidden; border-radius: 8px; background: var(--rf-bg-subtle); }
-.rf-comment-upload-previews img { width: 100%; height: 100%; object-fit: cover; }
-.rf-comment-upload-previews button { position: absolute; top: 4px; right: 4px; display: grid; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; place-items: center; border-radius: 50%; color: #fff; background: rgba(15, 20, 25, .72); font-size: 17px; }
 .rf-x-reply-login { width: 100%; min-height: 52px; border-bottom: 1px solid var(--rf-line); color: var(--primary); background: transparent; font-weight: 650; }
 .rf-x-reply-login:hover { background: var(--rf-bg-hover); }
-.rf-x-reply-row { display: flex; min-width: 0; gap: 10px; padding: 12px 16px 9px; border-bottom: 1px solid var(--rf-line); transition: background-color 150ms ease-out; }
-.rf-x-reply-row:hover { background: var(--rf-bg-hover); }
-.rf-x-reply-body { min-width: 0; flex: 1; }
-.rf-x-reply-meta { position: relative; display: flex; min-width: 0; min-height: 22px; align-items: center; gap: 4px; color: var(--rf-muted); font-size: 13px; }
-.rf-x-reply-meta > a { min-width: 0; }
-.rf-x-reply-meta strong { display: block; overflow: hidden; color: var(--rf-text); text-overflow: ellipsis; white-space: nowrap; }
-.rf-x-reply-meta > span, .rf-x-reply-meta time { flex: 0 0 auto; white-space: nowrap; }
-.rf-x-reply-body > p { margin: 2px 0 8px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.rf-x-reply-body :deep(.rf-post-media-grid) { max-width: 480px; margin: 6px 0 8px; }
-.rf-x-reply-menu { position: relative; margin-left: auto; }
-.rf-x-reply-menu > button { display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--rf-muted); background: transparent; }
-.rf-x-reply-menu > button:hover { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }
-.rf-x-reply-menu > div { position: absolute; z-index: 10; top: 32px; right: 0; width: max-content; min-width: 136px; overflow: hidden; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg); box-shadow: 0 8px 24px rgba(15, 20, 25, .15); }
-.rf-x-reply-menu > div button { width: 100%; min-height: 42px; padding: 0 14px; color: var(--rf-text); background: transparent; font-weight: 650; text-align: left; }
-.rf-x-reply-menu > div button:hover { background: var(--rf-bg-hover); }
-.rf-x-reply-menu > div button.danger { color: var(--rf-danger); }
-.rf-x-reply-menu > div button.danger:hover { background: color-mix(in srgb, var(--rf-danger) 8%, transparent); }
-.rf-x-reply-actions { display: flex; max-width: 220px; align-items: center; justify-content: space-between; color: var(--rf-muted); }
-.rf-x-reply-actions button { display: inline-flex; min-width: 38px; min-height: 32px; align-items: center; gap: 5px; padding: 0 7px; border-radius: var(--rf-pill); color: inherit; background: transparent; font-size: 12px; }
-.rf-x-reply-actions button:hover, .rf-x-reply-actions button.liked { color: #f91880; background: rgba(249, 24, 128, .08); }
-.rf-x-reply-actions button:last-child:hover { color: var(--primary); background: color-mix(in srgb, var(--primary) 9%, transparent); }
 .rf-x-replies-empty { padding: 32px 16px; }
 .rf-x-menu-enter-active { transition: opacity 150ms ease-out, transform 170ms cubic-bezier(.22, 1, .36, 1); }
 .rf-x-menu-leave-active { transition: opacity 90ms ease-in, transform 90ms ease-in; }
@@ -546,6 +627,30 @@ onBeforeUnmount(clearCommentFiles)
 .rf-x-status-loading b:nth-of-type(2) { width: 86%; }
 .rf-x-status-loading b:nth-of-type(3) { width: 64%; }
 @keyframes rf-x-status-pulse { from { opacity: .52; } to { opacity: 1; } }
+.rf-viewer-author { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; padding: 15px 16px 12px; border-bottom: 1px solid var(--rf-line); }
+.rf-viewer-author > div, .rf-viewer-author a { min-width: 0; }
+.rf-viewer-author > div > a { display: flex; align-items: center; gap: 5px; }
+.rf-viewer-author strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-viewer-author small { display: block; overflow: hidden; color: var(--rf-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.rf-viewer-post-copy { padding: 13px 16px; border-bottom: 1px solid var(--rf-line); }
+.rf-viewer-tags { margin-bottom: 8px; }
+.rf-viewer-post-copy h2 { margin: 0 0 7px; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
+.rf-viewer-post-copy p { margin: 0 0 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rf-viewer-post-copy time { color: var(--rf-muted); font-size: 12px; }
+.rf-viewer-stats { display: flex; flex-wrap: wrap; gap: 13px; min-height: 44px; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--rf-line); color: var(--rf-muted); font-size: 13px; }
+.rf-viewer-stats strong { color: var(--rf-text); font-variant-numeric: tabular-nums; }
+.rf-viewer-actions { display: grid; min-height: 48px; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--rf-line); }
+.rf-viewer-actions button { display: inline-grid; width: 38px; height: 38px; place-self: center; place-items: center; border-radius: 50%; color: var(--rf-muted); background: transparent; transition: color 150ms ease-out, background-color 150ms ease-out, transform 100ms ease-out; }
+.rf-viewer-actions button:hover { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.rf-viewer-actions button:active { transform: scale(.92); }
+.rf-viewer-actions button:disabled { cursor: wait; opacity: .5; }
+.rf-viewer-actions button.reposted { color: var(--rf-success); }
+.rf-viewer-actions button.liked { color: #f91880; }
+.rf-viewer-actions button.bookmarked { color: var(--primary); }
+.rf-viewer-login { min-height: 46px; border-bottom: 1px solid var(--rf-line); color: var(--primary); background: transparent; font-weight: 650; }
+.rf-viewer-login:hover { background: var(--rf-bg-hover); }
+.rf-viewer-comments { display: flex; flex-direction: column; min-height: 0; }
+.rf-viewer-comments-empty { padding: 26px 16px; color: var(--rf-muted); text-align: center; }
 
 @media (max-width: 560px) {
   .rf-x-status-header { padding-inline: 8px; }
@@ -555,9 +660,6 @@ onBeforeUnmount(clearCommentFiles)
   .rf-x-status-post h1 { font-size: 21px; }
   .rf-x-status-content { font-size: 17px; }
   .rf-x-status-stats { gap: 13px; font-size: 13px; }
-  .rf-x-reply-composer, .rf-x-reply-row { padding-inline: 12px; }
-  .rf-x-reply-composer textarea { font-size: 16px; }
-  .rf-x-reply-meta time { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

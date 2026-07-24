@@ -28,6 +28,7 @@ const saving = ref(false)
 const currentAvatar = computed(() => avatarPreview.value || auth.user?.avatar_url || '')
 const currentCover = computed(() => coverPreview.value || (coverRemoved.value ? '' : auth.user?.cover_url || ''))
 const canSave = computed(() => form.display_name.trim().length >= 2 && !saving.value)
+const acceptedImageTypes = computed(() => auth.user?.member_active ? 'image/jpeg,image/png,image/gif' : 'image/jpeg,image/png')
 
 function revokePreview(value: string) {
   if (value) URL.revokeObjectURL(value)
@@ -40,8 +41,13 @@ function chooseImage(
   const input = event.target as HTMLInputElement
   const file = input.files?.[0] || null
   if (!file) return
-  if (!['image/jpeg', 'image/png'].includes(file.type)) {
-    Notify.warn(`${kind === 'avatar' ? '头像' : '封面'}仅支持 JPG 和 PNG`)
+  if (file.type === 'image/gif' && !auth.user?.member_active) {
+    Notify.warn('GIF 动图头像和封面仅限会员用户')
+    input.value = ''
+    return
+  }
+  if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
+    Notify.warn(`${kind === 'avatar' ? '头像' : '封面'}仅支持 JPG、PNG${auth.user?.member_active ? ' 和 GIF' : ''}`)
     input.value = ''
     return
   }
@@ -136,8 +142,8 @@ onBeforeUnmount(() => {
           <UserAvatar :src="currentAvatar" :name="form.display_name" :size="112" />
           <span><AppIcon name="image" size="20" /></span>
         </button>
-        <input ref="avatarInput" class="rf-visually-hidden" type="file" accept="image/jpeg,image/png" @change="chooseImage($event, 'avatar')" />
-        <input ref="coverInput" class="rf-visually-hidden" type="file" accept="image/jpeg,image/png" @change="chooseImage($event, 'cover')" />
+        <input ref="avatarInput" class="rf-visually-hidden" type="file" :accept="acceptedImageTypes" @change="chooseImage($event, 'avatar')" />
+        <input ref="coverInput" class="rf-visually-hidden" type="file" :accept="acceptedImageTypes" @change="chooseImage($event, 'cover')" />
       </section>
 
       <section class="rf-x-edit-fields">

@@ -6,10 +6,10 @@ import { errorMessage, fetchAdminContentReports, fetchAdminPosts, moderateAdminP
 import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import PostMediaGrid from '@/components/PostMediaGrid.vue'
+import PostTagList from '@/components/PostTagList.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
-import { postTypeLabel } from '@/postTypes'
 
 type ModerationTab = 'posts' | 'reports'
 type PostAction = 'published' | 'rejected' | 'hidden' | 'deleted'
@@ -193,10 +193,10 @@ onMounted(load)
         <article v-for="item in items" :key="item.id" class="rf-admin-post-row">
           <header>
             <UserAvatar :src="item.author_avatar" :name="item.author_name" :size="40" />
-            <div><div class="rf-post-meta"><strong>{{ item.author_name }}</strong><VerifiedBadge :verified="item.author_verified" :label="item.author_verification_label" /><MembershipBadge :active="item.author_member" :tier-id="item.author_membership_tier_id" /><span>·</span><time>{{ new Date(item.created_at).toLocaleString('zh-CN') }}</time></div><small>#{{ item.id }} · {{ item.board_name }} · {{ postTypeLabel(item.post_type) }}</small></div>
+            <div><div class="rf-post-meta"><strong>{{ item.author_name }}</strong><VerifiedBadge :verified="item.author_verified" :label="item.author_verification_label" /><MembershipBadge :active="item.author_member" :tier-id="item.author_membership_tier_id" /><span>·</span><time>{{ new Date(item.created_at).toLocaleString('zh-CN') }}</time></div><small>#{{ item.id }} · {{ item.board_name }}</small></div>
             <span class="rf-status-chip" :class="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
           </header>
-          <h2>{{ item.title }}</h2><p>{{ item.content }}</p>
+          <PostTagList :tags="item.tags" compact /><h2 v-if="item.title">{{ item.title }}</h2><p>{{ item.content }}</p>
           <PostMediaGrid v-if="item.media?.length" :media="item.media" />
           <footer><div class="rf-admin-post-metrics"><span>{{ item.views }} 浏览</span><span>{{ item.comment_count }} 评论</span><span>{{ item.like_count }} 点赞</span></div><div class="rf-row-actions">
             <button v-if="item.status === 'published'" type="button" class="rf-secondary-button rf-button-small" @click="router.push(`/posts/${item.id}`)">查看</button>

@@ -34,13 +34,16 @@ import (
 )
 
 type Server struct {
-	store     *store.Store
-	staticDir string
-	uploadDir string
-	publicURL string
-	logger    *slog.Logger
-	limiter   *requestLimiter
-	moderator contentmoderation.Service
+	store          *store.Store
+	staticDir      string
+	uploadDir      string
+	publicURL      string
+	logger         *slog.Logger
+	limiter        *requestLimiter
+	moderator      contentmoderation.Service
+	chatHub        *chatHub
+	chatLimit      *chatConnectionLimiter
+	trustedProxies trustedProxySet
 }
 
 type contextKey string
@@ -52,12 +55,22 @@ func New(data *store.Store, staticDir, uploadDir, publicURL string, logger *slog
 }
 
 func NewWithModeration(data *store.Store, staticDir, uploadDir, publicURL string, logger *slog.Logger, moderator contentmoderation.Service) *Server {
-	return &Server{store: data, staticDir: staticDir, uploadDir: uploadDir, publicURL: strings.TrimRight(publicURL, "/"), logger: logger, limiter: newRequestLimiter(), moderator: moderator}
+	return &Server{store: data, staticDir: staticDir, uploadDir: uploadDir, publicURL: strings.TrimRight(publicURL, "/"), logger: logger, limiter: newRequestLimiter(), moderator: moderator, chatHub: newChatHub(), chatLimit: newChatConnectionLimiter()}
+}
+
+func (s *Server) ConfigureTrustedProxyCIDRs(value string) error {
+	trusted, err := parseTrustedProxyCIDRs(value)
+	if err != nil {
+		return err
+	}
+	s.trustedProxies = trusted
+	return nil
 }
 
 func (s *Server) Router() http.Handler {
+	s.reconcileDeletedCommunityMedia()
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.Recoverer, middleware.Timeout(2*time.Minute))
+	r.Use(middleware.RequestID, middleware.Recoverer, requestTimeoutExceptStreams(2*time.Minute))
 	r.Use(s.securityHeaders, s.cors, s.rateLimit, s.csrfProtection)
 	r.Get("/api/v1/health", s.health)
 	r.Get("/api/v1/site/settings", s.publicSiteSettings)
@@ -142,6 +155,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/v1/conversations/{conversationID}/remind", s.remindGroupInvitees)
 		r.Get("/api/v1/conversations/{conversationID}/messages", s.listMessages)
 		r.Post("/api/v1/conversations/{conversationID}/messages", s.createMessage)
+		r.Get("/api/v1/conversations/{conversationID}/stream", s.streamConversationMessages)
 		r.Post("/api/v1/resources", s.createResource)
 		r.Get("/api/v1/me/resources", s.listMyResources)
 		r.Post("/api/v1/resources/{resourceID}/orders", s.createResourceOrder)
@@ -222,7 +236,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline' https://static.geetest.com https://*.geetest.com; script-src 'self' https://static.cloudflareinsights.com https://static.geetest.com https://*.geetest.com https://*.geevisit.com https://*.gsensebot.com; connect-src 'self' https:; frame-src 'self' https://*.geetest.com https://*.geevisit.com https://*.gsensebot.com")
-		if requestScheme(r) == "https" {
+		if requestScheme(r, s.trustedProxies) == "https" {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -594,10 +608,10 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		BoardID  int64  `json:"board_id"`
-		Title    string `json:"title"`
-		Content  string `json:"content"`
-		PostType string `json:"post_type"`
+		BoardID int64    `json:"board_id"`
+		Title   string   `json:"title"`
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -605,7 +619,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	if !s.approveContent(w, r, "post", moderationText("标题："+input.Title, "正文："+input.Content)) {
 		return
 	}
-	item, err := s.store.CreatePost(currentUser(r).ID, input.BoardID, input.Title, input.Content, input.PostType)
+	item, err := s.store.CreatePostWithTagsAndMedia(currentUser(r).ID, input.BoardID, input.Title, input.Content, input.Tags, nil)
 	if err != nil {
 		writeError(w, 400, "post_failed", err.Error())
 		return
@@ -629,21 +643,30 @@ func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
 		r.Body = http.MaxBytesReader(w, r.Body, maxCommentMediaCount*maxCommentMediaUpload+(1<<20))
 		if err := r.ParseMultipartForm(8 << 20); err != nil {
-			writeError(w, http.StatusBadRequest, "comment_upload_invalid", "评论图片过大或表单格式无效")
+			writeError(w, http.StatusBadRequest, "comment_upload_invalid", "评论媒体过大或表单格式无效")
 			return
 		}
 		defer r.MultipartForm.RemoveAll()
 		content := strings.TrimSpace(r.FormValue("content"))
+		var parentID *int64
+		if rawParentID := strings.TrimSpace(r.FormValue("parent_id")); rawParentID != "" {
+			value, parseErr := strconv.ParseInt(rawParentID, 10, 64)
+			if parseErr != nil || value < 1 {
+				writeError(w, http.StatusBadRequest, "comment_parent_invalid", "回复目标无效")
+				return
+			}
+			parentID = &value
+		}
 		files := r.MultipartForm.File["files"]
 		if len(files) == 0 {
 			files = r.MultipartForm.File["file"]
 		}
 		if len(files) > maxCommentMediaCount {
-			writeError(w, http.StatusBadRequest, "comment_media_too_many", "每条评论最多上传 4 张图片")
+			writeError(w, http.StatusBadRequest, "comment_media_too_many", "每条评论最多上传 4 个媒体文件")
 			return
 		}
 		if content == "" && len(files) == 0 {
-			writeError(w, http.StatusBadRequest, "comment_invalid", "评论内容或图片不能为空")
+			writeError(w, http.StatusBadRequest, "comment_invalid", "评论内容或媒体不能为空")
 			return
 		}
 		if content != "" && !s.approveContent(w, r, "comment", content) {
@@ -664,13 +687,13 @@ func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			savedPaths = append(savedPaths, path)
-			if !s.approveImagePath(w, r, "comment", path) {
+			if isImageMedia(item.MIMEType) && !s.approveImagePath(w, r, "comment", path) {
 				cleanup()
 				return
 			}
 			media = append(media, item)
 		}
-		item, err := s.store.CreateCommentWithMedia(user.ID, id, content, media)
+		item, err := s.store.CreateCommentWithMediaAndParent(user.ID, id, parentID, content, media)
 		if err != nil {
 			cleanup()
 			switch {
@@ -680,6 +703,8 @@ func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusForbidden, "comment_author_unavailable", "当前账号无法发表评论")
 			case errors.Is(err, store.ErrPostUnavailable):
 				writeError(w, http.StatusNotFound, "post_unavailable", "帖子不存在或已停止评论")
+			case errors.Is(err, store.ErrParentCommentUnavailable):
+				writeError(w, http.StatusNotFound, "comment_parent_unavailable", "要回复的评论不存在")
 			default:
 				s.logger.Error("create comment with media failed", "request_id", middleware.GetReqID(r.Context()), "user_id", user.ID, "post_id", id, "error", err)
 				writeError(w, http.StatusInternalServerError, "comment_failed", "评论发布失败，请稍后重试")
@@ -690,7 +715,8 @@ func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Content string `json:"content"`
+		Content  string `json:"content"`
+		ParentID *int64 `json:"parent_id"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -698,7 +724,7 @@ func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
 	if !s.approveContent(w, r, "comment", input.Content) {
 		return
 	}
-	item, err := s.store.CreateComment(user.ID, id, input.Content)
+	item, err := s.store.CreateCommentWithMediaAndParent(user.ID, id, input.ParentID, input.Content, nil)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrCommentInvalid):
@@ -707,6 +733,8 @@ func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "comment_author_unavailable", "当前账号无法发表评论")
 		case errors.Is(err, store.ErrPostUnavailable):
 			writeError(w, http.StatusNotFound, "post_unavailable", "帖子不存在或已停止评论")
+		case errors.Is(err, store.ErrParentCommentUnavailable):
+			writeError(w, http.StatusNotFound, "comment_parent_unavailable", "要回复的评论不存在")
 		default:
 			s.logger.Error("create comment failed", "request_id", middleware.GetReqID(r.Context()), "user_id", user.ID, "post_id", id, "error", err)
 			writeError(w, http.StatusInternalServerError, "comment_failed", "评论发布失败，请稍后重试")
@@ -852,7 +880,7 @@ func (s *Server) verifyCaptcha(r *http.Request, token string) error {
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	if err := validateGT4(r.Context(), client, config, token); err != nil {
-		s.logger.Warn("GT4 captcha validation failed", "error", err, "client_ip", requestClientIP(r))
+		s.logger.Warn("GT4 captcha validation failed", "error", err, "client_ip", requestClientIP(r, s.trustedProxies))
 		return errors.New("人机验证失败，请重新验证")
 	}
 	return nil

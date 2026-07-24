@@ -1,12 +1,6 @@
 package app
 
 import (
-	"errors"
-	"image"
-	_ "image/jpeg"
-	_ "image/png"
-	"io"
-	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -19,14 +13,14 @@ import (
 )
 
 const (
-	maxPostMediaUpload = 5 << 20
+	maxPostMediaUpload = maxCommunityVideoUpload
 	maxPostMediaCount  = 4
 )
 
 func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxPostMediaCount*maxPostMediaUpload+(4<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "post_upload_invalid", "帖子图片过大或表单格式无效")
+		writeError(w, http.StatusBadRequest, "post_upload_invalid", "帖子媒体过大或表单格式无效")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
@@ -34,7 +28,7 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 	boardID, _ := strconv.ParseInt(strings.TrimSpace(r.FormValue("board_id")), 10, 64)
 	title := r.FormValue("title")
 	content := r.FormValue("content")
-	postType := r.FormValue("post_type")
+	tags := r.MultipartForm.Value["tags"]
 	if !s.approveContent(w, r, "post", moderationText("标题："+title, "正文："+content)) {
 		return
 	}
@@ -43,7 +37,7 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 		files = r.MultipartForm.File["file"]
 	}
 	if len(files) > maxPostMediaCount {
-		writeError(w, http.StatusBadRequest, "post_media_too_many", "每篇帖子最多上传 4 张图片")
+		writeError(w, http.StatusBadRequest, "post_media_too_many", "每篇帖子最多上传 4 个媒体文件")
 		return
 	}
 	media := make([]store.PostMediaInput, 0, len(files))
@@ -61,14 +55,14 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		savedPaths = append(savedPaths, path)
-		if !s.approveImagePath(w, r, "post", path) {
+		if isImageMedia(item.MIMEType) && !s.approveImagePath(w, r, "post", path) {
 			cleanup()
 			return
 		}
 		media = append(media, item)
 	}
 
-	item, err := s.store.CreatePostWithMedia(currentUser(r).ID, boardID, title, content, postType, media)
+	item, err := s.store.CreatePostWithTagsAndMedia(currentUser(r).ID, boardID, title, content, tags, media)
 	if err != nil {
 		cleanup()
 		writeError(w, http.StatusBadRequest, "post_failed", err.Error())
@@ -78,59 +72,17 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) savePostMedia(header *multipart.FileHeader) (store.PostMediaInput, string, error) {
-	if header == nil || header.Size < 1 || header.Size > maxPostMediaUpload {
-		return store.PostMediaInput{}, "", errors.New("图片为空或超过 5 MB")
-	}
-	extension := strings.ToLower(filepath.Ext(filepath.Base(header.Filename)))
-	if extension != ".png" && extension != ".jpg" && extension != ".jpeg" {
-		return store.PostMediaInput{}, "", errors.New("帖子图片仅支持 PNG 和 JPG")
-	}
-	file, err := header.Open()
+	item, path, err := saveCommunityMedia(header, filepath.Join(s.uploadDir, "posts"))
 	if err != nil {
-		return store.PostMediaInput{}, "", errors.New("图片读取失败")
+		return store.PostMediaInput{}, "", err
 	}
-	defer file.Close()
-	firstBytes := make([]byte, 512)
-	readCount, readErr := io.ReadFull(file, firstBytes)
-	if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		return store.PostMediaInput{}, "", errors.New("图片读取失败")
-	}
-	firstBytes = firstBytes[:readCount]
-	mimeType := http.DetectContentType(firstBytes)
-	if (extension == ".png" && mimeType != "image/png") || ((extension == ".jpg" || extension == ".jpeg") && mimeType != "image/jpeg") {
-		return store.PostMediaInput{}, "", errors.New("图片内容与扩展名不匹配")
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return store.PostMediaInput{}, "", errors.New("图片无法重新读取")
-	}
-	config, _, err := image.DecodeConfig(io.LimitReader(file, maxPostMediaUpload+1))
-	if err != nil || config.Width < 16 || config.Height < 16 || config.Width > 6000 || config.Height > 6000 {
-		return store.PostMediaInput{}, "", errors.New("图片尺寸必须在 16 × 16 至 6000 × 6000 之间")
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return store.PostMediaInput{}, "", errors.New("图片无法重新读取")
-	}
-	storedName, err := randomStoredName(extension)
-	if err != nil {
-		return store.PostMediaInput{}, "", errors.New("图片文件名生成失败")
-	}
-	dir := filepath.Join(s.uploadDir, "posts")
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return store.PostMediaInput{}, "", errors.New("图片目录创建失败")
-	}
-	targetPath := filepath.Join(dir, storedName)
-	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0640)
-	if err != nil {
-		return store.PostMediaInput{}, "", errors.New("图片保存失败")
-	}
-	written, copyErr := io.Copy(target, io.LimitReader(file, maxPostMediaUpload+1))
-	syncErr := target.Sync()
-	closeErr := target.Close()
-	if copyErr != nil || syncErr != nil || closeErr != nil || written < 1 || written > maxPostMediaUpload {
-		_ = os.Remove(targetPath)
-		return store.PostMediaInput{}, "", errors.New("图片为空、过大或保存失败")
-	}
-	return store.PostMediaInput{StoredName: storedName, MIMEType: mimeType, Width: config.Width, Height: config.Height, SizeBytes: written}, targetPath, nil
+	return store.PostMediaInput{
+		StoredName: item.StoredName,
+		MIMEType:   item.MIMEType,
+		Width:      item.Width,
+		Height:     item.Height,
+		SizeBytes:  item.SizeBytes,
+	}, path, nil
 }
 
 func (s *Server) servePostMedia(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +122,7 @@ func (s *Server) servePostMedia(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("Vary", "Cookie")
 	}
-	w.Header().Set("Content-Type", mime.TypeByExtension(strings.ToLower(filepath.Ext(name))))
+	w.Header().Set("Content-Type", communityMediaContentType(name))
 	http.ServeFile(w, r, path)
 }
 
@@ -181,7 +133,7 @@ func localPostMediaName(value string) string {
 	}
 	name := strings.TrimPrefix(value, prefix)
 	extension := strings.ToLower(filepath.Ext(name))
-	if filepath.Base(name) != name || (extension != ".png" && extension != ".jpg" && extension != ".jpeg") {
+	if filepath.Base(name) != name || (extension != ".png" && extension != ".jpg" && extension != ".jpeg" && extension != ".mp4" && extension != ".webm") {
 		return ""
 	}
 	return name

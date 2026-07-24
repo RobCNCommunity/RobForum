@@ -29,6 +29,7 @@ var (
 	ErrInvalidCredentials       = errors.New("invalid credentials")
 	ErrCommentInvalid           = errors.New("comment is invalid")
 	ErrCommentAuthorUnavailable = errors.New("comment author is not available")
+	ErrParentCommentUnavailable = errors.New("parent comment is not available")
 	ErrPostUnavailable          = errors.New("post is not available")
 	dummyPasswordHash, _        = bcrypt.GenerateFromPassword([]byte("invalid-password-placeholder"), bcrypt.DefaultCost)
 )
@@ -110,6 +111,9 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 	}
+	if err := s.ensureColumnAbsent("posts", "post_type"); err != nil {
+		return fmt.Errorf("migration column posts.post_type removal failed: %w", err)
+	}
 	// Backfill the immutable purchase ledger before any request can rely on it.
 	// Historical duplicate paid orders intentionally map to the earliest order only.
 	if _, err := s.db.Exec(`INSERT IGNORE INTO resource_purchases (user_id, resource_id, order_id, purchased_at)
@@ -168,6 +172,7 @@ func (s *Store) migrate() error {
 		{table: "conversation_members", name: "responded_at", def: "DATETIME(6) NULL"},
 		{table: "conversation_members", name: "last_notified_at", def: "DATETIME(6) NULL"},
 		{table: "notifications", name: "conversation_id", def: "BIGINT NULL"},
+		{table: "comments", name: "parent_id", def: "BIGINT NULL"},
 	} {
 		if err := s.ensureColumn(column.table, column.name, column.def); err != nil {
 			return fmt.Errorf("migration column %s.%s failed: %w", column.table, column.name, err)
@@ -183,6 +188,7 @@ func (s *Store) migrate() error {
 		{table: "password_resets", name: "idx_resets_expires", def: "INDEX idx_resets_expires (expires_at)"},
 		{table: "email_verifications", name: "idx_email_verifications_expires", def: "INDEX idx_email_verifications_expires (expires_at)"},
 		{table: "comments", name: "idx_comments_author", def: "INDEX idx_comments_author (author_id, status, post_id)"},
+		{table: "comments", name: "idx_comments_parent", def: "INDEX idx_comments_parent (parent_id, status, created_at)"},
 		{table: "users", name: "idx_users_status_created", def: "INDEX idx_users_status_created (status, created_at)"},
 		{table: "users", name: "idx_users_profile_status_created", def: "INDEX idx_users_profile_status_created (profile_status, created_at)"},
 		{table: "posts", name: "idx_posts_status_updated", def: "INDEX idx_posts_status_updated (status, updated_at)"},
@@ -198,6 +204,9 @@ func (s *Store) migrate() error {
 		if err := s.ensureIndex(index.table, index.name, index.def); err != nil {
 			return fmt.Errorf("migration index %s.%s failed: %w", index.table, index.name, err)
 		}
+	}
+	if err := s.ensureForeignKey("comments", "fk_comments_parent", "FOREIGN KEY (parent_id) REFERENCES comments(id) ON DELETE SET NULL"); err != nil {
+		return fmt.Errorf("migration foreign key comments.fk_comments_parent failed: %w", err)
 	}
 	if _, err := s.db.Exec(`UPDATE creator_payouts SET net_amount_cents = amount_cents WHERE amount_cents > 0 AND net_amount_cents = 0 AND withdrawal_fee_cents = 0`); err != nil {
 		return fmt.Errorf("creator payout fee backfill failed: %w", err)
@@ -218,6 +227,16 @@ func (s *Store) ensureColumn(table, column, definition string) error {
 	return err
 }
 
+func (s *Store) ensureColumnAbsent(table, column string) error {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`, table, column).Scan(&count)
+	if err != nil || count == 0 {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` DROP COLUMN ` + column)
+	return err
+}
+
 func (s *Store) ensureIndex(table, index, definition string) error {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`, table, index).Scan(&count)
@@ -225,6 +244,19 @@ func (s *Store) ensureIndex(table, index, definition string) error {
 		return err
 	}
 	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD ` + definition)
+	if isMigrationAlreadyApplied(err) {
+		return nil
+	}
+	return err
+}
+
+func (s *Store) ensureForeignKey(table, constraint, definition string) error {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = DATABASE() AND table_name = ? AND constraint_name = ?`, table, constraint).Scan(&count)
+	if err != nil || count != 0 {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD CONSTRAINT ` + constraint + ` ` + definition)
 	if isMigrationAlreadyApplied(err) {
 		return nil
 	}
@@ -1183,11 +1215,11 @@ func (s *Store) ListBoards() ([]domain.Board, error) {
 }
 
 func (s *Store) ListPosts(boardSlug, query string, limit int) ([]domain.Post, error) {
-	return s.listPosts(boardSlug, query, "", limit, false)
+	return s.listPosts(boardSlug, query, limit, false)
 }
 
 func (s *Store) ListPostsPage(boardSlug, query string, limit, offset int) (domain.PostPage, error) {
-	return s.listPostsPage(boardSlug, query, "", limit, offset, false)
+	return s.listPostsPage(boardSlug, query, limit, offset, false)
 }
 
 // ListRecommendedPosts and ListRecommendedPostsPage intentionally have no
@@ -1195,23 +1227,23 @@ func (s *Store) ListPostsPage(boardSlug, query string, limit, offset int) (domai
 // the home timeline from accidentally inheriting a board filter when the
 // caller is navigating between a board page and the home page.
 func (s *Store) ListRecommendedPosts(limit int) ([]domain.Post, error) {
-	return s.listPosts("", "", "", limit, true)
+	return s.listPosts("", "", limit, true)
 }
 
 func (s *Store) ListRecommendedPostsPage(limit, offset int) (domain.PostPage, error) {
-	return s.listPostsPage("", "", "", limit, offset, true)
+	return s.listPostsPage("", "", limit, offset, true)
 }
 
-func (s *Store) SearchPosts(query, category string, limit int) ([]domain.Post, error) {
-	return s.listPosts("", query, category, limit, false)
+func (s *Store) SearchPosts(query string, limit int) ([]domain.Post, error) {
+	return s.listPosts("", query, limit, false)
 }
 
-func (s *Store) listPosts(boardSlug, query, category string, limit int, prioritizeMembers bool) ([]domain.Post, error) {
-	page, err := s.listPostsPage(boardSlug, query, category, limit, 0, prioritizeMembers)
+func (s *Store) listPosts(boardSlug, query string, limit int, prioritizeMembers bool) ([]domain.Post, error) {
+	page, err := s.listPostsPage(boardSlug, query, limit, 0, prioritizeMembers)
 	return page.Items, err
 }
 
-func (s *Store) listPostsPage(boardSlug, query, category string, limit, offset int, prioritizeMembers bool) (domain.PostPage, error) {
+func (s *Store) listPostsPage(boardSlug, query string, limit, offset int, prioritizeMembers bool) (domain.PostPage, error) {
 	boardSlug = strings.TrimSpace(boardSlug)
 	if strings.EqualFold(boardSlug, "all") {
 		boardSlug = ""
@@ -1227,15 +1259,6 @@ func (s *Store) listPostsPage(boardSlug, query, category string, limit, offset i
 	if boardSlug != "" {
 		where += ` AND b.slug = ?`
 		args = append(args, boardSlug)
-	}
-	switch category {
-	case "":
-	case "posts":
-		where += ` AND p.post_type <> 'guide' AND b.slug <> 'guides'`
-	case "guides":
-		where += ` AND (p.post_type = 'guide' OR b.slug = 'guides')`
-	default:
-		return domain.PostPage{}, errors.New("post search category is invalid")
 	}
 	query = strings.TrimSpace(query)
 	if len([]rune(query)) > 100 {
@@ -1254,7 +1277,7 @@ func (s *Store) listPostsPage(boardSlug, query, category string, limit, offset i
 		// content indefinitely.
 		orderBy = `p.pinned DESC, p.featured DESC, (UNIX_TIMESTAMP(p.updated_at) + CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() AND mt.feed_priority = 1 THEN 21600 ELSE 0 END) DESC, p.id DESC`
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id LEFT JOIN membership_tiers mt ON mt.id = u.membership_tier_id WHERE `+where+` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, args...)
+	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id LEFT JOIN membership_tiers mt ON mt.id = u.membership_tier_id WHERE `+where+` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return domain.PostPage{}, err
 	}
@@ -1263,7 +1286,7 @@ func (s *Store) listPostsPage(boardSlug, query, category string, limit, offset i
 	for rows.Next() {
 		var item domain.Post
 		var authorVerified, authorMember, pinned, featured int
-		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return domain.PostPage{}, err
 		}
 		item.AuthorVerified = authorVerified != 0
@@ -1309,6 +1332,10 @@ func (s *Store) GetPost(id int64) (domain.Post, error) {
 	if err != nil {
 		return domain.Post{}, err
 	}
+	item.Tags, err = getPostTags(tx, id)
+	if err != nil {
+		return domain.Post{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Post{}, err
 	}
@@ -1319,7 +1346,7 @@ func getPost(queryer rowQueryer, id int64) (domain.Post, error) {
 	var item domain.Post
 	var pinned, featured int
 	var authorVerified, authorMember int
-	err := queryer.QueryRow(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active'`, id).Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt)
+	err := queryer.QueryRow(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active'`, id).Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt)
 	item.AuthorVerified = authorVerified != 0
 	item.AuthorMember = authorMember != 0
 	item.Pinned = pinned != 0
@@ -1327,22 +1354,23 @@ func getPost(queryer rowQueryer, id int64) (domain.Post, error) {
 	return item, err
 }
 
-func (s *Store) CreatePost(userID, boardID int64, title, content, postType string) (domain.Post, error) {
-	return s.CreatePostWithMedia(userID, boardID, title, content, postType, nil)
+func (s *Store) CreatePost(userID, boardID int64, title, content string) (domain.Post, error) {
+	return s.CreatePostWithTagsAndMedia(userID, boardID, title, content, nil, nil)
 }
 
-func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content, postType string, media []PostMediaInput) (domain.Post, error) {
+func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content string, media []PostMediaInput) (domain.Post, error) {
+	return s.CreatePostWithTagsAndMedia(userID, boardID, title, content, nil, media)
+}
+
+func (s *Store) CreatePostWithTagsAndMedia(userID, boardID int64, title, content string, tags []string, media []PostMediaInput) (domain.Post, error) {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
-	postType = strings.ToLower(strings.TrimSpace(postType))
-	if title == "" || len([]rune(title)) > 180 || content == "" || len([]rune(content)) > 50000 || containsControl(title) || containsControl(content) {
+	if len([]rune(title)) > 180 || content == "" || len([]rune(content)) > 50000 || containsControl(title) || containsControl(content) {
 		return domain.Post{}, errors.New("title or content is invalid")
 	}
-	if postType == "" {
-		postType = "discussion"
-	}
-	if postType != "discussion" && postType != "guide" && postType != "resource" && postType != "team-up" && postType != "recruitment" && postType != "trade" && postType != "event" {
-		return domain.Post{}, errors.New("post type is invalid")
+	normalizedTags, err := normalizePostTags(tags)
+	if err != nil {
+		return domain.Post{}, err
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1379,7 +1407,7 @@ func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content, postT
 		return domain.Post{}, err
 	}
 	now := time.Now().UTC()
-	result, err := tx.Exec(`INSERT INTO posts (board_id, author_id, title, content, post_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, boardID, userID, title, content, postType, postStatus, now, now)
+	result, err := tx.Exec(`INSERT INTO posts (board_id, author_id, title, content, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, boardID, userID, title, content, postStatus, now, now)
 	if err != nil {
 		return domain.Post{}, err
 	}
@@ -1390,11 +1418,18 @@ func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content, postT
 	if err := insertPostMedia(tx, id, media, now); err != nil {
 		return domain.Post{}, err
 	}
+	if err := insertPostTags(tx, id, normalizedTags); err != nil {
+		return domain.Post{}, err
+	}
 	item, err := getPostForModeration(tx, id)
 	if err != nil {
 		return domain.Post{}, err
 	}
 	item.Media, err = getPostMedia(tx, id)
+	if err != nil {
+		return domain.Post{}, err
+	}
+	item.Tags, err = getPostTags(tx, id)
 	if err != nil {
 		return domain.Post{}, err
 	}
@@ -1413,7 +1448,7 @@ func initialPostStatus(reviewRequired bool, authorRole string, membershipExempt 
 }
 
 func (s *Store) ListComments(postID int64) ([]domain.Comment, error) {
-	rows, err := s.db.Query(`SELECT c.id, c.post_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.post_id = ? AND c.status = 'published' AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND pu.status = 'active' ORDER BY c.created_at ASC LIMIT 200`, postID)
+	rows, err := s.db.Query(`SELECT c.id, c.post_id, c.parent_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.post_id = ? AND c.status = 'published' AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND pu.status = 'active' ORDER BY c.created_at ASC LIMIT 500`, postID)
 	if err != nil {
 		return nil, err
 	}
@@ -1422,7 +1457,7 @@ func (s *Store) ListComments(postID int64) ([]domain.Comment, error) {
 	for rows.Next() {
 		var item domain.Comment
 		var authorVerified, authorMember int
-		if err := rows.Scan(&item.ID, &item.PostID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Content, &item.LikeCount, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.PostID, &item.ParentID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Content, &item.LikeCount, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		item.AuthorVerified = authorVerified != 0
@@ -1439,12 +1474,16 @@ func (s *Store) ListComments(postID int64) ([]domain.Comment, error) {
 }
 
 func (s *Store) CreateComment(userID, postID int64, content string) (domain.Comment, error) {
-	return s.CreateCommentWithMedia(userID, postID, content, nil)
+	return s.CreateCommentWithMediaAndParent(userID, postID, nil, content, nil)
 }
 
 func (s *Store) CreateCommentWithMedia(userID, postID int64, content string, media []CommentMediaInput) (domain.Comment, error) {
+	return s.CreateCommentWithMediaAndParent(userID, postID, nil, content, media)
+}
+
+func (s *Store) CreateCommentWithMediaAndParent(userID, postID int64, parentID *int64, content string, media []CommentMediaInput) (domain.Comment, error) {
 	content = strings.TrimSpace(content)
-	if (content == "" && len(media) == 0) || len([]rune(content)) > 5000 || containsControl(content) || len(media) > maxCommentMediaCount {
+	if (content == "" && len(media) == 0) || len([]rune(content)) > 5000 || containsControl(content) || len(media) > maxCommentMediaCount || (parentID != nil && *parentID < 1) {
 		return domain.Comment{}, ErrCommentInvalid
 	}
 	tx, err := s.db.Begin()
@@ -1463,8 +1502,19 @@ func (s *Store) CreateCommentWithMedia(userID, postID int64, content string, med
 	if err := tx.QueryRow(`SELECT p.id, p.author_id FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' FOR UPDATE`, postID).Scan(&targetID, &postAuthorID); err != nil {
 		return domain.Comment{}, ErrPostUnavailable
 	}
+	notificationUserID := postAuthorID
+	if parentID != nil {
+		var parentPostID int64
+		var parentParentID sql.NullInt64
+		if err := tx.QueryRow(`SELECT post_id, author_id, parent_id FROM comments WHERE id = ? AND status = 'published' FOR UPDATE`, *parentID).Scan(&parentPostID, &notificationUserID, &parentParentID); err != nil {
+			return domain.Comment{}, ErrParentCommentUnavailable
+		}
+		if err := validateCommentReplyTarget(parentPostID, postID, parentParentID); err != nil {
+			return domain.Comment{}, err
+		}
+	}
 	now := time.Now().UTC()
-	result, err := tx.Exec(`INSERT INTO comments (post_id, author_id, content, status, created_at) VALUES (?, ?, ?, 'published', ?)`, postID, userID, content, now)
+	result, err := tx.Exec(`INSERT INTO comments (post_id, parent_id, author_id, content, status, created_at) VALUES (?, ?, ?, ?, 'published', ?)`, postID, parentID, userID, content, now)
 	if err != nil {
 		return domain.Comment{}, err
 	}
@@ -1485,7 +1535,7 @@ func (s *Store) CreateCommentWithMedia(userID, postID int64, content string, med
 		}
 		return domain.Comment{}, errors.New("post comment count update failed")
 	}
-	if err := createNotification(tx, postAuthorID, userID, "comment", postID, id); err != nil {
+	if err := createNotification(tx, notificationUserID, userID, "comment", postID, id); err != nil {
 		return domain.Comment{}, err
 	}
 	item, err := getComment(tx, id)
@@ -1501,7 +1551,7 @@ func (s *Store) CreateCommentWithMedia(userID, postID int64, content string, med
 func getComment(queryer sqlQueryer, id int64) (domain.Comment, error) {
 	var item domain.Comment
 	var authorVerified, authorMember int
-	err := queryer.QueryRow(`SELECT c.id, c.post_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.id = ? AND c.status = 'published' AND u.status = 'active' AND p.status = 'published' AND b.status = 'active' AND pu.status = 'active'`, id).Scan(&item.ID, &item.PostID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Content, &item.LikeCount, &item.CreatedAt)
+	err := queryer.QueryRow(`SELECT c.id, c.post_id, c.parent_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.id = ? AND c.status = 'published' AND u.status = 'active' AND p.status = 'published' AND b.status = 'active' AND pu.status = 'active'`, id).Scan(&item.ID, &item.PostID, &item.ParentID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Content, &item.LikeCount, &item.CreatedAt)
 	item.AuthorVerified = authorVerified != 0
 	item.AuthorMember = authorMember != 0
 	if err == nil {

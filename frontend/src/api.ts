@@ -84,8 +84,8 @@ export interface User {
 
 export interface Board { id: number; slug: string; name: string; description: string; icon: string; post_count: number }
 export interface PostMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
-export interface Post { id: number; board_id: number; board_name: string; author_id: number; author_name: string; author_avatar: string; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; title: string; content: string; post_type: string; status: string; pinned: boolean; featured: boolean; views: number; comment_count: number; like_count: number; repost_count: number; liked: boolean; bookmarked: boolean; reposted: boolean; media?: PostMedia[]; created_at: string; updated_at: string }
-export interface Comment { id: number; post_id: number; author_id: number; author_name: string; author_avatar: string; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; content: string; media?: PostMedia[]; like_count: number; liked: boolean; created_at: string }
+export interface Post { id: number; board_id: number; board_name: string; author_id: number; author_name: string; author_avatar: string; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; title: string; content: string; status: string; pinned: boolean; featured: boolean; views: number; comment_count: number; like_count: number; repost_count: number; liked: boolean; bookmarked: boolean; reposted: boolean; tags?: string[]; media?: PostMedia[]; created_at: string; updated_at: string }
+export interface Comment { id: number; post_id: number; parent_id?: number; author_id: number; author_name: string; author_avatar: string; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; content: string; media?: PostMedia[]; like_count: number; liked: boolean; created_at: string }
 export interface ResourceFile { id: number; resource_id: number; original_name: string; mime_type: string; size_bytes: number; sha256: string; created_at: string }
 export interface ResourceMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
 export interface Resource { id: number; creator_id: number; creator_name: string; creator_verified: boolean; creator_verification_label?: string; creator_member: boolean; creator_membership_tier_id?: number; title: string; description: string; game: string; version: string; resource_type: string; price_cents: number; status: string; review_reason?: string; download_count: number; sales_count: number; file?: ResourceFile; media?: ResourceMedia[]; created_at: string; updated_at: string }
@@ -93,7 +93,7 @@ export interface PublicUser { id: number; display_name: string; avatar_url: stri
 export interface AdminUser { id: number; email: string; display_name: string; avatar_url: string; role: string; status: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; membership_expires_at?: string; post_count: number; comment_count: number; resource_count: number; created_at: string; updated_at: string }
 export interface UserProfile { user: PublicUser; posts: Post[]; resources: Resource[]; follower_count: number; following_count: number; following: boolean }
 export interface UserSearchResult extends PublicUser { post_count: number; resource_count: number; hot_score: number }
-export interface CommunitySearchResult { query: string; posts: Post[]; guides: Post[]; resources: Resource[]; users: UserSearchResult[] }
+export interface CommunitySearchResult { query: string; posts: Post[]; resources: Resource[]; users: UserSearchResult[] }
 export interface ChatMessage { id: number; conversation_id: number; sender_id: number; sender_name: string; sender_avatar: string; content: string; created_at: string }
 export interface Conversation { id: number; kind: 'direct' | 'group'; name: string; created_by: number; members: PublicUser[]; last_message?: ChatMessage; unread_count: number; membership_status: 'accepted' | 'pending' | 'declined'; accepted_member_count: number; pending_invite_count: number; active: boolean; created_at: string; updated_at: string }
 export interface ConversationInvite { conversation: Conversation; invited_at: string }
@@ -207,11 +207,12 @@ export async function fetchFollowingPostsPage(offset = 0, limit = 30) { return d
 export async function fetchBookmarkedPosts() { return data<Post[]>(await api.get('/me/bookmarks')) }
 export async function fetchPost(id: number) { return data<Post>(await api.get(`/posts/${id}`)) }
 export async function fetchComments(id: number) { return data<Comment[]>(await api.get(`/posts/${id}/comments`)) }
-export async function createPost(input: { board_id: number; title: string; content: string; post_type: string; files?: File[] }) { const form = new FormData(); form.append('board_id', String(input.board_id)); form.append('title', input.title); form.append('content', input.content); form.append('post_type', input.post_type); for (const file of input.files || []) form.append('files', file); return data<Post>(await api.post('/posts', form)) }
-export async function createComment(id: number, content: string, files: File[] = []) {
-  if (!files.length) return data<Comment>(await api.post(`/posts/${id}/comments`, { content }))
+export async function createPost(input: { board_id: number; title: string; content: string; tags?: string[]; files?: File[] }) { const form = new FormData(); form.append('board_id', String(input.board_id)); form.append('title', input.title); form.append('content', input.content); for (const tag of input.tags || []) form.append('tags', tag); for (const file of input.files || []) form.append('files', file); return data<Post>(await api.post('/posts', form)) }
+export async function createComment(id: number, content: string, files: File[] = [], parentId?: number) {
+  if (!files.length) return data<Comment>(await api.post(`/posts/${id}/comments`, { content, parent_id: parentId }))
   const form = new FormData()
   form.append('content', content)
+  if (parentId) form.append('parent_id', String(parentId))
   for (const file of files) form.append('files', file)
   return data<Comment>(await api.post(`/posts/${id}/comments`, form))
 }

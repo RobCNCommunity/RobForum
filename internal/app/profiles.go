@@ -68,8 +68,13 @@ func (s *Server) uploadMyAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	extension := strings.ToLower(filepath.Ext(filepath.Base(header.Filename)))
-	if extension != ".jpg" && extension != ".jpeg" && extension != ".png" {
-		writeError(w, 400, "avatar_type_invalid", "头像仅支持 JPG 和 PNG")
+	expectedMIME, typeErr := expectedProfileImageMIME(extension, currentUser(r).MemberActive)
+	if errors.Is(typeErr, errMemberGIFRequired) {
+		writeError(w, http.StatusForbidden, "avatar_gif_membership_required", "GIF 动态头像仅限会员使用")
+		return
+	}
+	if typeErr != nil {
+		writeError(w, 400, "avatar_type_invalid", "头像仅支持 JPG、PNG，会员可使用 GIF")
 		return
 	}
 	firstBytes := make([]byte, 512)
@@ -80,7 +85,7 @@ func (s *Server) uploadMyAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 	firstBytes = firstBytes[:readCount]
 	mimeType := http.DetectContentType(firstBytes)
-	if (extension == ".png" && mimeType != "image/png") || ((extension == ".jpg" || extension == ".jpeg") && mimeType != "image/jpeg") {
+	if mimeType != expectedMIME {
 		writeError(w, 400, "avatar_type_mismatch", "头像内容与文件扩展名不匹配")
 		return
 	}
@@ -158,8 +163,13 @@ func (s *Server) uploadMyCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	extension := strings.ToLower(filepath.Ext(filepath.Base(header.Filename)))
-	if extension != ".jpg" && extension != ".jpeg" && extension != ".png" {
-		writeError(w, http.StatusBadRequest, "cover_type_invalid", "封面仅支持 JPG 和 PNG")
+	expectedMIME, typeErr := expectedProfileImageMIME(extension, currentUser(r).MemberActive)
+	if errors.Is(typeErr, errMemberGIFRequired) {
+		writeError(w, http.StatusForbidden, "cover_gif_membership_required", "GIF 动态背景仅限会员使用")
+		return
+	}
+	if typeErr != nil {
+		writeError(w, http.StatusBadRequest, "cover_type_invalid", "封面仅支持 JPG、PNG，会员可使用 GIF")
 		return
 	}
 	firstBytes := make([]byte, 512)
@@ -170,7 +180,7 @@ func (s *Server) uploadMyCover(w http.ResponseWriter, r *http.Request) {
 	}
 	firstBytes = firstBytes[:readCount]
 	mimeType := http.DetectContentType(firstBytes)
-	if (extension == ".png" && mimeType != "image/png") || ((extension == ".jpg" || extension == ".jpeg") && mimeType != "image/jpeg") {
+	if mimeType != expectedMIME {
 		writeError(w, http.StatusBadRequest, "cover_type_mismatch", "封面内容与文件扩展名不匹配")
 		return
 	}
@@ -286,7 +296,7 @@ func localAvatarName(value string) string {
 	}
 	name := strings.TrimPrefix(value, prefix)
 	extension := strings.ToLower(filepath.Ext(name))
-	if filepath.Base(name) != name || (extension != ".jpg" && extension != ".jpeg" && extension != ".png") {
+	if filepath.Base(name) != name || (extension != ".jpg" && extension != ".jpeg" && extension != ".png" && extension != ".gif") {
 		return ""
 	}
 	return name
@@ -299,7 +309,7 @@ func localCoverName(value string) string {
 	}
 	name := strings.TrimPrefix(value, prefix)
 	extension := strings.ToLower(filepath.Ext(name))
-	if filepath.Base(name) != name || (extension != ".jpg" && extension != ".jpeg" && extension != ".png") {
+	if filepath.Base(name) != name || (extension != ".jpg" && extension != ".jpeg" && extension != ".png" && extension != ".gif") {
 		return ""
 	}
 	return name

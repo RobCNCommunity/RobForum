@@ -209,10 +209,12 @@ func (s *Server) markNotificationsRead(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request) {
 	commentID, _ := strconv.ParseInt(chi.URLParam(r, "commentID"), 10, 64)
-	if err := s.store.DeleteComment(currentUser(r).ID, currentUser(r).Role == "admin", commentID); err != nil {
+	storedNames, err := s.store.DeleteComment(currentUser(r).ID, currentUser(r).Role == "admin", commentID)
+	if err != nil {
 		writeError(w, 400, "comment_delete_failed", err.Error())
 		return
 	}
+	s.cleanupDeletedCommentMedia(storedNames)
 	writeJSON(w, 200, map[string]any{"deleted": true})
 }
 
@@ -348,6 +350,7 @@ func (s *Server) removeConversationMember(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "conversation_member_remove_failed", err.Error())
 		return
 	}
+	s.chatHub.disconnectUser(conversationID, memberID)
 	writeJSON(w, http.StatusOK, map[string]any{"removed": true})
 }
 
@@ -376,6 +379,7 @@ func (s *Server) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "conversation_leave_failed", err.Error())
 		return
 	}
+	s.chatHub.disconnectUser(conversationID, currentUser(r).ID)
 	writeJSON(w, http.StatusOK, map[string]any{"left": true})
 }
 
@@ -385,6 +389,7 @@ func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "conversation_delete_failed", err.Error())
 		return
 	}
+	s.chatHub.disconnectConversation(conversationID)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
@@ -473,5 +478,6 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "message_send_failed", err.Error())
 		return
 	}
+	s.chatHub.broadcast(item)
 	writeJSON(w, 201, item)
 }

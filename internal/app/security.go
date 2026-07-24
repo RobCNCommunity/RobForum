@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -68,6 +67,8 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		limit, window, scope := 360, time.Minute, "api"
 		path := r.URL.Path
 		switch {
+		case isConversationStreamRequest(r):
+			limit, window, scope = 240, time.Minute, "chat-stream"
 		case path == "/api/v1/auth/login":
 			limit, window, scope = 10, 10*time.Minute, "login"
 		case path == "/api/v1/auth/register":
@@ -87,7 +88,7 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		case r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions:
 			limit, window, scope = 120, time.Minute, "write"
 		}
-		key := scope + "|" + requestClientIP(r)
+		key := scope + "|" + requestClientIP(r, s.trustedProxies)
 		if token := sessionToken(r); token != "" && scope == "write" {
 			hash := sha256.Sum256([]byte(token))
 			key += "|" + hex.EncodeToString(hash[:6])
@@ -106,32 +107,6 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 	})
 }
 
-func requestClientIP(r *http.Request) string {
-	remote := strings.TrimSpace(r.RemoteAddr)
-	host, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		host = remote
-	}
-	if parsed := net.ParseIP(host); parsed != nil && parsed.IsLoopback() {
-		if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); net.ParseIP(forwarded) != nil {
-			return forwarded
-		}
-	}
-	if net.ParseIP(host) != nil {
-		return host
-	}
-	return "unknown"
-}
-
-func remotePeerIsLoopback(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err != nil {
-		host = strings.TrimSpace(r.RemoteAddr)
-	}
-	parsed := net.ParseIP(host)
-	return parsed != nil && parsed.IsLoopback()
-}
-
 func (s *Server) csrfProtection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
@@ -147,7 +122,7 @@ func (s *Server) csrfProtection(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		originPresent, originOK := sameOriginRequest(r, s.publicURL)
+		originPresent, originOK := sameOriginRequest(r, s.publicURL, s.trustedProxies)
 		if originPresent && !originOK {
 			writeError(w, http.StatusForbidden, "csrf_origin_invalid", "请求来源无效")
 			return
@@ -175,7 +150,7 @@ func (s *Server) csrfProtection(next http.Handler) http.Handler {
 	})
 }
 
-func sameOriginRequest(r *http.Request, publicURL string) (bool, bool) {
+func sameOriginRequest(r *http.Request, publicURL string, trusted trustedProxySet) (bool, bool) {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
 		origin = refererOrigin(r.Header.Get("Referer"))
@@ -191,7 +166,7 @@ func sameOriginRequest(r *http.Request, publicURL string) (bool, bool) {
 		return true, false
 	}
 	if strings.EqualFold(parsed.Host, r.Host) {
-		return true, strings.EqualFold(parsed.Scheme, requestScheme(r))
+		return true, strings.EqualFold(parsed.Scheme, requestScheme(r, trusted))
 	}
 	for _, candidate := range []string{"http://127.0.0.1:5173", "http://localhost:5173", strings.TrimRight(publicURL, "/")} {
 		if candidate == "" {
@@ -212,12 +187,12 @@ func refererOrigin(referer string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-func requestScheme(r *http.Request) string {
+func requestScheme(r *http.Request, trusted trustedProxySet) string {
 	if r.TLS != nil {
 		return "https"
 	}
-	if remotePeerIsLoopback(r) && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
-		return "https"
+	if scheme := forwardedScheme(r, trusted); scheme != "" {
+		return scheme
 	}
 	return "http"
 }
@@ -235,7 +210,7 @@ func (s *Server) secureCookies(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	if remotePeerIsLoopback(r) && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+	if forwardedScheme(r, s.trustedProxies) == "https" {
 		return true
 	}
 	if parsed, err := url.Parse(strings.TrimSpace(s.publicURL)); err == nil && strings.EqualFold(parsed.Scheme, "https") {

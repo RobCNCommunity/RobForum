@@ -28,10 +28,10 @@ const searchRoute = computed(() => route.path === '/search')
 const messagesRoute = computed(() => route.path === '/messages')
 const ownsMainHeader = computed(() => profileRoute.value || postDetailRoute.value || profileEditRoute.value || searchRoute.value || (!isMobile.value && timelineRoute.value))
 const loginRoute = computed(() => route.path === '/login')
-const mobileBottomNavVisible = computed(() => !mobileFocusMode.value && !profileRoute.value && !profileEditRoute.value)
+const mobileBottomNavVisible = computed(() => !mobileFocusMode.value && !profileRoute.value && !postDetailRoute.value && !profileEditRoute.value)
 const mobileFABVisible = computed(() => {
   const path = route.path
-  return path === '/' || path.startsWith('/boards/') || (path.startsWith('/posts/') && path !== '/posts/new') || /^\/users\/\d+$/.test(path)
+  return path === '/' || path.startsWith('/boards/') || /^\/users\/\d+$/.test(path)
 })
 const selectedKey = computed(() => { const p = route.path; if (p.startsWith('/admin/')) return p.startsWith('/admin/settings')?'/admin/settings':p.startsWith('/admin/ads')?'/admin/ads':p.startsWith('/admin/notices')?'/admin/notices':p.startsWith('/admin/resources')?'/admin/resources':p.startsWith('/admin/payouts')?'/admin/payouts':p.startsWith('/admin/wallet')?'/admin/wallet':p.startsWith('/admin/verifications')?'/admin/verifications':p.startsWith('/admin/users')?'/admin/users':'/admin/posts'; if (p.startsWith('/settings')) return '/settings/profile'; if (p.startsWith('/verification')) return '/verification/apply'; if (p.startsWith('/membership')) return '/membership'; if (p.startsWith('/resources')) return '/resources'; if (p.startsWith('/wallet')) return '/wallet'; if (p.startsWith('/messages')) return '/messages'; if (p.startsWith('/notifications')) return '/notifications'; if (p.startsWith('/bookmarks')) return '/bookmarks'; if (p.startsWith('/users')) return auth.user && p === `/users/${auth.user.id}` ? p : '/users'; if (p.startsWith('/boards/')) return p; return '/' })
 function updateViewport() { isMobile.value = window.innerWidth < 1020 }

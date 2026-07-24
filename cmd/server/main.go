@@ -44,6 +44,9 @@ func main() {
 		panic(err)
 	}
 	server := app.NewWithModeration(data, staticDir, uploadDir, publicURL, slog.Default(), moderator)
+	if err := server.ConfigureTrustedProxyCIDRs(os.Getenv("ROBLOX_TRUSTED_PROXY_CIDRS")); err != nil {
+		panic(err)
+	}
 	addr := getenv("ROBLOX_ADDR", ":8088")
 	slog.Info("roblox community listening", "addr", addr, "db_driver", driver, "content_moderation_enabled", moderator.Enabled())
 	httpServer := &http.Server{
