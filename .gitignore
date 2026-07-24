@@ -22,6 +22,9 @@ pnpm-debug.log*
 bin/
 build/
 output/
+/roblox-community
+/server
+deploy/roblox-community-linux-amd64
 *.exe
 *.test
 *.out
