@@ -65,6 +65,35 @@ func (s *Server) approveContent(w http.ResponseWriter, r *http.Request, contentT
 	return true
 }
 
+func (s *Server) postMachineApproved(r *http.Request, content string) bool {
+	if s.moderator == nil || !s.moderator.Enabled() {
+		return false
+	}
+	user := currentUser(r)
+	result, reviewErr := s.moderator.Review(r.Context(), "post", content)
+	decision := "allowed"
+	reason := result.Reason
+	if reviewErr != nil {
+		decision = "unavailable"
+		reason = "provider_unavailable"
+	} else if result.Violation {
+		decision = "blocked"
+	}
+	if strings.TrimSpace(result.Model) == "" {
+		result.Model = "content_moderation"
+	}
+	if err := s.store.RecordContentModeration(user.ID, "post", content, decision, reason, result.Model); err != nil {
+		if s.logger != nil {
+			s.logger.Error("post moderation audit failed", "request_id", middleware.GetReqID(r.Context()), "user_id", user.ID, "error", err)
+		}
+		return false
+	}
+	if reviewErr != nil && s.logger != nil {
+		s.logger.Warn("post moderation unavailable; queued for manual review", "request_id", middleware.GetReqID(r.Context()), "user_id", user.ID, "error", reviewErr)
+	}
+	return reviewErr == nil && !result.Violation
+}
+
 // approveImagePath reviews a newly saved, not-yet-committed user image. The
 // caller remains responsible for deleting the temporary file when this
 // method returns false. Only a domain-separated SHA-256 input is passed to the
@@ -129,4 +158,29 @@ func (s *Server) approveImagePath(w http.ResponseWriter, r *http.Request, conten
 		return false
 	}
 	return true
+}
+
+type responseSink struct {
+	header http.Header
+}
+
+func (w *responseSink) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (*responseSink) WriteHeader(int) {}
+
+func (*responseSink) Write(content []byte) (int, error) {
+	return len(content), nil
+}
+
+func (s *Server) postImageMachineApproved(r *http.Request, path string) bool {
+	imageModerator, ok := s.moderator.(contentmoderation.ImageService)
+	if !ok || !imageModerator.ImageEnabled() {
+		return false
+	}
+	return s.approveImagePath(&responseSink{}, r, "post", path)
 }

@@ -616,10 +616,8 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if !s.approveContent(w, r, "post", moderationText("标题："+input.Title, "正文："+input.Content)) {
-		return
-	}
-	item, err := s.store.CreatePostWithTagsAndMedia(currentUser(r).ID, input.BoardID, input.Title, input.Content, input.Tags, nil)
+	machineApproved := s.postMachineApproved(r, moderationText("标题："+input.Title, "正文："+input.Content))
+	item, err := s.store.CreateMachineModeratedPostWithTagsAndMedia(currentUser(r).ID, input.BoardID, input.Title, input.Content, input.Tags, nil, machineApproved)
 	if err != nil {
 		writeError(w, 400, "post_failed", err.Error())
 		return

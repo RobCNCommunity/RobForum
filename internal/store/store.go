@@ -1363,6 +1363,14 @@ func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content string
 }
 
 func (s *Store) CreatePostWithTagsAndMedia(userID, boardID int64, title, content string, tags []string, media []PostMediaInput) (domain.Post, error) {
+	return s.createPostWithTagsAndMedia(userID, boardID, title, content, tags, media, "")
+}
+
+func (s *Store) CreateMachineModeratedPostWithTagsAndMedia(userID, boardID int64, title, content string, tags []string, media []PostMediaInput, machineApproved bool) (domain.Post, error) {
+	return s.createPostWithTagsAndMedia(userID, boardID, title, content, tags, media, machineModeratedPostStatus(machineApproved))
+}
+
+func (s *Store) createPostWithTagsAndMedia(userID, boardID int64, title, content string, tags []string, media []PostMediaInput, moderatedStatus string) (domain.Post, error) {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
 	if len([]rune(title)) > 180 || content == "" || len([]rune(content)) > 50000 || containsControl(title) || containsControl(content) {
@@ -1398,7 +1406,10 @@ func (s *Store) CreatePostWithTagsAndMedia(userID, boardID int64, title, content
 		}
 		memberExempt = err == nil && tier.PostReviewExempt
 	}
-	postStatus := initialPostStatus(reviewRequired != 0, authorRole, memberExempt)
+	postStatus := moderatedStatus
+	if postStatus == "" {
+		postStatus = initialPostStatus(reviewRequired != 0, authorRole, memberExempt)
+	}
 	var boardName string
 	if err := tx.QueryRow(`SELECT name FROM boards WHERE id = ? AND status = 'active' FOR UPDATE`, boardID).Scan(&boardName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1445,6 +1456,13 @@ func initialPostStatus(reviewRequired bool, authorRole string, membershipExempt 
 		return "pending"
 	}
 	return "published"
+}
+
+func machineModeratedPostStatus(approved bool) string {
+	if approved {
+		return "published"
+	}
+	return "pending"
 }
 
 func (s *Store) ListComments(postID int64) ([]domain.Comment, error) {
