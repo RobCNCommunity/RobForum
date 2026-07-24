@@ -51,6 +51,7 @@ frontend/.qa-markdown-evidence/
 .deploy-staging/
 .ui-reference/
 frontend/.ui-craft/
+/CHANGELOG.md
 
 # OS files
 .DS_Store
