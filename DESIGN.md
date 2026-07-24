@@ -12,7 +12,7 @@
 - Surfaces: `--rf-bg`, `--rf-bg-subtle`, and `--rf-bg-hover`.
 - Text: `--rf-text`, `--rf-muted`, and `--rf-faint`.
 - Borders: `--rf-line`; danger: `--rf-danger`; success: `--rf-success`.
-- Typography: system UI stacks in `--rf-font` and `--rf-font-display`.
+- Typography: MiSans is the primary face for both `--rf-font` and `--rf-font-display`, with system CJK fonts as fallbacks.
 - Radius: `--rf-radius` is 8px for framed tools; `--rf-pill` is reserved for pills and compact actions.
 - Touch targets: interactive controls use at least `--rf-touch` (44px) where space permits.
 - Motion: `--ease` for standard transitions and spring-like cubic Bezier curves for direct manipulation.

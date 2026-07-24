@@ -11,8 +11,8 @@
   --rf-line: #eff3f4;
   --rf-danger: #f4212e;
   --rf-success: #00ba7c;
-  --rf-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --rf-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", sans-serif;
+  --rf-font: "MiSans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --rf-font-display: "MiSans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --rf-radius: 8px;
   --rf-pill: 9999px;
   --rf-touch: 44px;
