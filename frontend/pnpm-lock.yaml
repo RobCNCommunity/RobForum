@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@lucide/vue':
+        specifier: ^1.25.0
+        version: 1.25.0(vue@3.5.40(typescript@5.6.3))
       '@nutui/icons-vue':
         specifier: 0.1.1
         version: 0.1.1
@@ -220,6 +223,11 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@lucide/vue@1.25.0':
+    resolution: {integrity: sha512-hkEetV+v48ScIn3uwqwWQ66sI8foeP2q6OMI09GzLFH4SfvBlfe3JHYlMBdBCqFC7WRlhFsndyDn/awRKRc2OQ==}
+    peerDependencies:
+      vue: '>=3.0.1'
 
   '@nutui/icons-vue@0.1.1':
     resolution: {integrity: sha512-ekn6R9GNHWNUcV4pxdhQzrI1g1VhZ5zknklXoUJrCzt0RkRRLU0bUXX3ouWT0sl0U3MNJClnXAzZe7iPAvgPtw==}
@@ -964,6 +972,10 @@ snapshots:
     optional: true
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@lucide/vue@1.25.0(vue@3.5.40(typescript@5.6.3))':
+    dependencies:
+      vue: 3.5.40(typescript@5.6.3)
 
   '@nutui/icons-vue@0.1.1': {}
 

@@ -1,17 +1,176 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
-import { createResource, createResourceOrder, errorMessage, fetchCreatorBalance, fetchCreatorPayouts, fetchMyOrders, fetchMyResources, fetchResources, requestCreatorPayout, resourceDownloadURL, type CommerceOrder, type CreatorPayout, type Resource } from '@/api'
+import {
+  createResourceOrder,
+  createWalletResourceOrder,
+  errorMessage,
+  fetchMyOrders,
+  fetchMyResources,
+  fetchResources,
+  fetchWallet,
+  resourceDownloadURL,
+  type CommerceOrder,
+  type Resource,
+} from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import AppIcon from '@/components/AppIcon.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
+import MembershipBadge from '@/components/MembershipBadge.vue'
 import PageContainer from '@/components/PageContainer.vue'
-const auth=useAuthStore();const router=useRouter();const resources=ref<Resource[]>([]);const mine=ref<Resource[]>([]);const orders=ref<CommerceOrder[]>([]);const payouts=ref<CreatorPayout[]>([]);const creatorBalance=ref(0);const loading=ref(true);const submitting=ref(false);const buyingID=ref<number|null>(null);const payoutSubmitting=ref(false);const selectedFile=ref<File|null>(null);const form=reactive({title:'',description:'',game:'',version:'',resource_type:'map',price_yuan:0});const payoutForm=reactive({amount_yuan:0,payout_method:'alipay',payout_account:'',account_name:'',note:''})
-async function load(){loading.value=true;try{resources.value=await fetchResources();if(auth.user){const [m,o,b,p]=await Promise.all([fetchMyResources(),fetchMyOrders(),fetchCreatorBalance(),fetchCreatorPayouts()]);mine.value=m;orders.value=o;creatorBalance.value=b.available_cents;payouts.value=p}}catch(e){Notify.danger(errorMessage(e,'资源加载失败'))}finally{loading.value=false}}
-function chooseFile(e:Event){selectedFile.value=(e.target as HTMLInputElement).files?.[0]||null}
-async function submit(){if(!selectedFile.value){Notify.warn('请选择资源文件');return};submitting.value=true;try{await createResource({title:form.title,description:form.description,game:form.game,version:form.version,resource_type:form.resource_type,price_cents:Math.max(0,Math.round(Number(form.price_yuan||0)*100)),file:selectedFile.value});Notify.success('资源已提交，等待管理员审核');Object.assign(form,{title:'',description:'',game:'',version:'',resource_type:'map',price_yuan:0});selectedFile.value=null;await load()}catch(e){Notify.danger(errorMessage(e,'资源投稿失败'))}finally{submitting.value=false}}
-async function buy(item:Resource){if(!auth.user){router.push('/login');return};buyingID.value=item.id;try{const order=await createResourceOrder(item.id);if(order.status==='paid'){window.location.href=resourceDownloadURL(item.id);return};if(!order.payment_url)throw new Error('支付跳转地址为空');window.location.href=order.payment_url}catch(e){Notify.danger(errorMessage(e,'订单创建失败'))}finally{buyingID.value=null}}
-async function submitPayout(){const cents=Math.round(Number(payoutForm.amount_yuan||0)*100);if(cents<1000){Notify.warn('单次提现最低 10 元');return};if(cents>creatorBalance.value){Notify.warn('提现金额超过可提现余额');return};if(!payoutForm.payout_account.trim()||!payoutForm.account_name.trim()){Notify.warn('请填写完整收款信息');return};payoutSubmitting.value=true;try{await requestCreatorPayout({amount_cents:cents,payout_method:payoutForm.payout_method,payout_account:payoutForm.payout_account,account_name:payoutForm.account_name,note:payoutForm.note});Notify.success('提现申请已提交');Object.assign(payoutForm,{amount_yuan:0,payout_method:'alipay',payout_account:'',account_name:'',note:''});await load()}catch(e){Notify.danger(errorMessage(e,'提现申请失败'))}finally{payoutSubmitting.value=false}}
-const formatSize=(v:number)=>v>1024*1024?`${(v/1024/1024).toFixed(1)} MB`:`${Math.max(1,Math.round(v/1024))} KB`;const money=(v:number)=>`¥${(v/100).toFixed(2)}`;const status=(v:string)=>({pending:'待审核',approved:'已发布',rejected:'已驳回'} as Record<string,string>)[v]||v;onMounted(load)
+
+const auth = useAuthStore()
+const router = useRouter()
+const resources = ref<Resource[]>([])
+const mine = ref<Resource[]>([])
+const orders = ref<CommerceOrder[]>([])
+const walletBalance = ref(0)
+const query = ref('')
+const loading = ref(true)
+const buyingID = ref<number | null>(null)
+const walletBuyingID = ref<number | null>(null)
+
+const purchasedResourceIDs = computed(() => new Set(orders.value.filter((order) => order.status === 'paid').map((order) => order.resource_id)))
+
+function canDownload(item: Resource) {
+  return item.price_cents === 0 || item.creator_id === auth.user?.id || purchasedResourceIDs.value.has(item.id)
+}
+
+async function load() {
+  loading.value = true
+  try {
+    resources.value = await fetchResources(query.value.trim() || undefined)
+    if (!auth.user) return
+    const [mineResult, orderResult, walletResult] = await Promise.all([
+      fetchMyResources(),
+      fetchMyOrders(),
+      fetchWallet(),
+    ])
+    mine.value = mineResult
+    orders.value = orderResult
+    walletBalance.value = walletResult.available_cents
+  } catch (error) {
+    Notify.danger(errorMessage(error, '资源加载失败'))
+  } finally {
+    loading.value = false
+  }
+}
+
+function formatSize(value?: number) {
+  if (!value) return '未知大小'
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function money(value: number) {
+  return `¥${(value / 100).toFixed(2)}`
+}
+
+function status(value: string) {
+  return ({ pending: '待审核', approved: '已发布', rejected: '已驳回', takedown: '已下架' } as Record<string, string>)[value] || value
+}
+
+function openResource(item: Resource) {
+  router.push(`/resources/${item.id}`)
+}
+
+async function buy(item: Resource) {
+  if (!auth.user) {
+    router.push({ path: '/login', query: { redirect: `/resources/${item.id}` } })
+    return
+  }
+  buyingID.value = item.id
+  try {
+    const order = await createResourceOrder(item.id)
+    if (order.status === 'paid') {
+      window.location.href = resourceDownloadURL(item.id)
+      return
+    }
+    if (!order.payment_url) throw new Error('支付跳转地址为空')
+    window.location.href = order.payment_url
+  } catch (error) {
+    Notify.danger(errorMessage(error, '订单创建失败'))
+  } finally {
+    buyingID.value = null
+  }
+}
+
+async function buyWithWallet(item: Resource) {
+  if (!auth.user) {
+    router.push({ path: '/login', query: { redirect: `/resources/${item.id}` } })
+    return
+  }
+  walletBuyingID.value = item.id
+  try {
+    await createWalletResourceOrder(item.id)
+    Notify.success('已使用钱包余额购买资源')
+    window.location.href = resourceDownloadURL(item.id)
+  } catch (error) {
+    Notify.danger(errorMessage(error, '余额支付失败'))
+  } finally {
+    walletBuyingID.value = null
+  }
+}
+
+onMounted(load)
 </script>
-<template><PageContainer title="资源中心"><div v-if="loading" class="rf-loading-block">正在加载资源…</div><div v-else class="rf-resource-layout"><main><div class="rf-section-label"><span>已发布资源</span><small>{{ resources.length }} 项</small></div><div v-if="resources.length" class="rf-resource-feed"><article v-for="item in resources" :key="item.id" class="rf-resource-row"><div class="rf-post-meta"><strong>{{ item.creator_name }}</strong><VerifiedBadge :verified="item.creator_verified" /><span>·</span><span>{{ item.resource_type }}</span><span>·</span><span>{{ item.game }}{{ item.version ? ` · ${item.version}` : '' }}</span></div><h2>{{ item.title }}</h2><p>{{ item.description }}</p><div class="rf-resource-meta"><span>{{ item.file?.original_name }} {{ item.file ? formatSize(item.file.size_bytes) : '' }}</span><span>{{ item.download_count }} 下载 · {{ item.sales_count }} 购买</span><strong>{{ item.price_cents > 0 ? money(item.price_cents) : '免费' }}</strong></div><div class="rf-resource-actions"><a v-if="item.price_cents===0" class="rf-primary-button" :href="resourceDownloadURL(item.id)">免费下载</a><button v-else type="button" class="rf-primary-button" :disabled="buyingID===item.id" @click="buy(item)">{{ buyingID===item.id?'处理中…':'购买资源' }}</button></div></article></div><div v-else class="rf-empty">还没有已发布资源</div><section v-if="auth.user && mine.length" class="rf-panel rf-resource-history"><div class="rf-section-label"><span>我的投稿</span><small>可提现 {{ money(creatorBalance) }}</small></div><div v-for="item in mine" :key="item.id" class="rf-history-row"><span>{{ item.title }}</span><b :class="`rf-status-${item.status}`">{{ status(item.status) }}</b></div></section><section v-if="auth.user && orders.length" class="rf-panel rf-resource-history"><div class="rf-section-label"><span>最近订单</span></div><div v-for="order in orders.slice(0,8)" :key="order.id" class="rf-history-row"><span>{{ order.resource_title }}</span><small>{{ money(order.amount_cents) }} · {{ order.status }}</small></div></section></main><aside><form v-if="auth.user" class="rf-panel rf-editor-form" @submit.prevent="submit"><h2>投稿资源</h2><p class="rf-form-note">免费和付费资源都必须先通过管理员审核。</p><label>资源标题<input v-model="form.title" placeholder="例如：新手地图模板" required /></label><label>描述<textarea v-model="form.description" rows="3" required /></label><div class="rf-form-two"><label>适用游戏<input v-model="form.game" placeholder="Brookhaven" required /></label><label>版本<input v-model="form.version" placeholder="1.0" /></label></div><label>资源类型<select v-model="form.resource_type"><option value="map">地图</option><option value="script">脚本</option><option value="asset">素材</option><option value="guide">教程</option><option value="other">其他</option></select></label><label>售价（元，0 为免费）<input v-model.number="form.price_yuan" type="number" min="0" step="0.01" /></label><label>文件<input type="file" @change="chooseFile" /><small v-if="selectedFile">{{ selectedFile.name }}</small></label><button type="submit" class="rf-primary-button" :disabled="submitting">{{ submitting?'提交中…':'提交审核' }}</button></form><form v-if="auth.user && (mine.length || creatorBalance > 0)" class="rf-panel rf-editor-form rf-payout-form" @submit.prevent="submitPayout"><h2>申请提现</h2><p class="rf-form-note">可提现 {{ money(creatorBalance) }}，最低 10 元。</p><label>提现金额（元）<input v-model.number="payoutForm.amount_yuan" type="number" min="0" step="0.01" /></label><label>收款方式<select v-model="payoutForm.payout_method"><option value="alipay">支付宝</option><option value="bank">银行卡</option><option value="paypal">PayPal</option><option value="other">其他</option></select></label><label>收款账户<input v-model="payoutForm.payout_account" /></label><label>收款人姓名<input v-model="payoutForm.account_name" /></label><label>备注<textarea v-model="payoutForm.note" rows="2" maxlength="500" /></label><button type="submit" class="rf-text-button" :disabled="payoutSubmitting || creatorBalance<1000">提交提现申请</button></form><div v-if="!auth.user" class="rf-info-banner">登录后可以投稿和购买资源。</div></aside></div></PageContainer></template>
+
+<template>
+  <PageContainer>
+    <header class="rf-resource-heading">
+      <div>
+        <p class="rf-kicker">RobForum 资源</p>
+        <h1>资源中心</h1>
+        <p>发现玩家分享的地图、脚本、素材和教程。每份资源都经过人工审核。</p>
+      </div>
+      <button v-if="auth.user" type="button" class="rf-primary-button" @click="router.push('/resources/new')"><AppIcon name="add" size="18" />发布资源</button>
+    </header>
+
+    <div class="rf-resource-toolbar">
+      <label class="rf-resource-search"><AppIcon name="search" size="18" /><input v-model="query" placeholder="搜索资源、游戏或作者" @keydown.enter.prevent="load" /><button v-if="query" type="button" aria-label="清空搜索" @click="query = ''; load()">×</button></label>
+      <button type="button" class="rf-secondary-button rf-button-small" :disabled="loading" @click="load">{{ loading ? '加载中…' : '刷新' }}</button>
+    </div>
+
+    <div v-if="loading" class="rf-list-loading rf-list-loading--wide"><span v-for="n in 5" :key="n" /></div>
+    <div v-else class="rf-resource-layout rf-resource-layout--feed">
+      <main>
+        <div class="rf-section-label"><span>最新资源</span><small>{{ resources.length }} 项</small></div>
+        <div v-if="resources.length" class="rf-resource-feed">
+          <article v-for="item in resources" :key="item.id" class="rf-resource-row rf-resource-row--feed" :class="{ 'rf-resource-row--with-thumb': !!item.media?.[0] }" @click="openResource(item)">
+            <div v-if="item.media?.[0]" class="rf-resource-thumb"><img :src="item.media[0].url" :alt="item.title" loading="lazy" /></div>
+            <div class="rf-resource-row-content">
+              <div class="rf-post-meta"><strong>{{ item.creator_name }}</strong><VerifiedBadge :verified="item.creator_verified" :label="item.creator_verification_label" /><MembershipBadge :active="item.creator_member" :tier-id="item.creator_membership_tier_id" /><span>·</span><span>{{ item.resource_type }}</span><span>·</span><span>{{ item.game }}{{ item.version ? ` · ${item.version}` : '' }}</span></div>
+              <h2>{{ item.title }}</h2>
+              <p>{{ item.description }}</p>
+              <div class="rf-resource-meta"><span>{{ item.file?.original_name || '资源文件' }} · {{ formatSize(item.file?.size_bytes) }}</span><span>{{ item.download_count }} 下载 · {{ item.sales_count }} 购买</span><strong>{{ item.price_cents > 0 ? money(item.price_cents) : '免费' }}</strong></div>
+              <div class="rf-resource-actions" @click.stop>
+                <a class="rf-secondary-button rf-button-small" :href="`/resources/${item.id}`">查看详情</a>
+                <a v-if="canDownload(item)" class="rf-primary-button rf-button-small" :href="resourceDownloadURL(item.id)">{{ item.price_cents === 0 ? '免费下载' : '下载资源' }}</a>
+                <template v-else>
+                  <button v-if="auth.user && walletBalance >= item.price_cents" type="button" class="rf-secondary-button rf-button-small" :disabled="walletBuyingID === item.id" @click="buyWithWallet(item)">{{ walletBuyingID === item.id ? '支付中…' : '余额支付' }}</button>
+                  <button type="button" class="rf-primary-button rf-button-small" :disabled="buyingID === item.id" @click="buy(item)">{{ buyingID === item.id ? '处理中…' : '购买' }}</button>
+                </template>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div v-else class="rf-empty"><AppIcon name="folder" size="28" /><strong>没有找到资源</strong><span>换个关键词再试试。</span></div>
+
+        <section v-if="auth.user && mine.length" class="rf-panel rf-resource-history">
+          <div class="rf-section-label"><span>我的投稿</span><RouterLink to="/wallet">收益与提现</RouterLink></div>
+          <RouterLink v-for="item in mine" :key="item.id" :to="`/resources/${item.id}`" class="rf-history-row"><span>{{ item.title }}</span><b :class="`rf-status-${item.status}`">{{ status(item.status) }}</b></RouterLink>
+        </section>
+        <section v-if="auth.user && orders.length" class="rf-panel rf-resource-history">
+          <div class="rf-section-label"><span>最近订单</span></div>
+          <div v-for="order in orders.slice(0, 8)" :key="order.id" class="rf-history-row"><span>{{ order.resource_title }}</span><small>{{ money(order.amount_cents) }} · {{ order.status }}</small></div>
+        </section>
+      </main>
+
+      <aside>
+        <div v-if="auth.user" class="rf-panel rf-resource-cta"><AppIcon name="upload" size="22" /><h2>分享你的作品</h2><p>上传文件和预览图，提交后由管理员人工审核。</p><button type="button" class="rf-primary-button" @click="router.push('/resources/new')">开始投稿</button></div>
+        <div v-else class="rf-panel rf-resource-cta"><AppIcon name="lock" size="22" /><h2>登录后投稿</h2><p>登录后可以发布资源、购买付费资源并查看投稿状态。</p><button type="button" class="rf-primary-button" @click="router.push('/login')">登录</button></div>
+      </aside>
+    </div>
+  </PageContainer>
+</template>

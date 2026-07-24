@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"roblox-community/internal/domain"
@@ -33,8 +34,65 @@ func (s *Server) updatePayment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, config)
 }
 
+func (s *Server) listAdminRedeemCodes(w http.ResponseWriter, _ *http.Request) {
+	items, err := s.store.ListRedeemCodes(100)
+	if err != nil {
+		writeError(w, 500, "redeem_codes_failed", "兑换码加载失败")
+		return
+	}
+	writeJSON(w, 200, items)
+}
+
+func (s *Server) createAdminRedeemCode(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		AmountCents int64  `json:"amount_cents"`
+		ExpiresAt   string `json:"expires_at"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	var expiresAt *time.Time
+	if strings.TrimSpace(input.ExpiresAt) != "" {
+		value, err := time.Parse(time.RFC3339, input.ExpiresAt)
+		if err != nil {
+			writeError(w, 400, "redeem_code_invalid", "兑换码有效期格式无效")
+			return
+		}
+		expiresAt = &value
+	}
+	item, err := s.store.CreateRedeemCode(currentUser(r).ID, input.AmountCents, expiresAt)
+	if err != nil {
+		writeError(w, 400, "redeem_code_invalid", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) revokeAdminRedeemCode(w http.ResponseWriter, r *http.Request) {
+	codeID, _ := strconv.ParseInt(chi.URLParam(r, "codeID"), 10, 64)
+	item, err := s.store.RevokeRedeemCode(currentUser(r).ID, codeID)
+	if err != nil {
+		writeError(w, 400, "redeem_code_revoke_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, item)
+}
+
 func (s *Server) createResourceOrder(w http.ResponseWriter, r *http.Request) {
 	resourceID, _ := strconv.ParseInt(chi.URLParam(r, "resourceID"), 10, 64)
+	order, err := s.store.CreateResourceOrder(currentUser(r).ID, resourceID)
+	if err != nil {
+		writeError(w, 400, "order_create_failed", err.Error())
+		return
+	}
+	if order.Status == "paid" {
+		writeJSON(w, http.StatusOK, order)
+		return
+	}
+	if order.Status != "pending" {
+		writeError(w, 409, "order_not_payable", "订单当前不可支付")
+		return
+	}
 	config, err := s.store.PaymentDeliveryConfig()
 	if err != nil || !config.Enabled {
 		writeError(w, 503, "payment_unavailable", "支付通道尚未配置")
@@ -43,11 +101,6 @@ func (s *Server) createResourceOrder(w http.ResponseWriter, r *http.Request) {
 	base, err := s.publicBaseURL()
 	if err != nil {
 		writeError(w, 503, "public_url_required", err.Error())
-		return
-	}
-	order, err := s.store.CreateResourceOrder(currentUser(r).ID, resourceID)
-	if err != nil {
-		writeError(w, 400, "order_create_failed", err.Error())
 		return
 	}
 	notifyURL := config.NotifyURL
@@ -69,6 +122,72 @@ func (s *Server) createResourceOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, order)
 }
 
+func (s *Server) createWalletResourceOrder(w http.ResponseWriter, r *http.Request) {
+	resourceID, _ := strconv.ParseInt(chi.URLParam(r, "resourceID"), 10, 64)
+	order, err := s.store.CreateWalletResourceOrder(currentUser(r).ID, resourceID)
+	if err != nil {
+		writeError(w, 400, "wallet_order_create_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, order)
+}
+
+func (s *Server) createWalletTopUp(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		AmountCents int64 `json:"amount_cents"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	config, err := s.store.PaymentDeliveryConfig()
+	if err != nil || !config.Enabled {
+		writeError(w, 503, "payment_unavailable", "支付通道尚未配置")
+		return
+	}
+	base, err := s.publicBaseURL()
+	if err != nil {
+		writeError(w, 503, "public_url_required", err.Error())
+		return
+	}
+	order, err := s.store.CreateWalletTopUp(currentUser(r).ID, input.AmountCents)
+	if err != nil {
+		writeError(w, 400, "wallet_top_up_invalid", err.Error())
+		return
+	}
+	notifyURL := config.NotifyURL
+	if notifyURL == "" {
+		notifyURL = base + "/api/v1/payment/callback"
+	}
+	returnURL := config.ReturnURL
+	if returnURL == "" {
+		returnURL = base + "/wallet"
+	}
+	order.PaymentURL, err = payment.BuildEPayURL(payment.EPayInput{GatewayURL: config.GatewayURL, MerchantID: config.MerchantID, Secret: config.Secret, PayType: config.PayType, OrderNo: order.OrderNo, Name: "RobForum 钱包充值", AmountCents: order.AmountCents, NotifyURL: notifyURL, ReturnURL: returnURL})
+	if err != nil {
+		if cancelErr := s.store.CancelWalletTopUp(order.ID, currentUser(r).ID); cancelErr != nil {
+			s.logger.Error("failed to cancel wallet top-up after payment URL generation error", "order_id", order.ID, "error", cancelErr)
+		}
+		writeError(w, 500, "wallet_top_up_url_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, order)
+}
+
+func (s *Server) redeemWalletCode(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Code string `json:"code"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := s.store.RedeemWalletCode(currentUser(r).ID, input.Code)
+	if err != nil {
+		writeError(w, 400, "redeem_code_invalid", err.Error())
+		return
+	}
+	writeJSON(w, 200, item)
+}
+
 func (s *Server) listMyOrders(w http.ResponseWriter, r *http.Request) {
 	items, err := s.store.ListCommerceOrders(currentUser(r).ID)
 	if err != nil {
@@ -84,7 +203,19 @@ func (s *Server) creatorBalance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "creator_balance_failed", "创作者余额加载失败")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"available_cents": balance, "platform_fee_percent": 10})
+	policy, err := s.store.UserFeePolicy(currentUser(r).ID)
+	if err != nil {
+		writeError(w, 500, "creator_balance_failed", "费率信息加载失败")
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"available_cents":      balance,
+		"service_fee_bps":      policy.ServiceFeeBPS,
+		"withdrawal_fee_bps":   policy.WithdrawalFeeBPS,
+		"membership_tier_id":   policy.MembershipTierID,
+		"membership_tier_name": policy.MembershipTierName,
+		"platform_fee_percent": float64(policy.ServiceFeeBPS) / 100,
+	})
 }
 
 func (s *Server) requestCreatorPayout(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +294,12 @@ func (s *Server) paymentCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tradeNo := strings.TrimSpace(r.Form.Get("trade_no"))
-	if _, _, err := s.store.CompleteResourceOrder(orderNo, tradeNo, amountCents); err != nil {
+	if strings.HasPrefix(orderNo, "RWT") {
+		if _, _, err := s.store.CompleteWalletTopUp(orderNo, tradeNo, amountCents); err != nil {
+			http.Error(w, "fail", http.StatusBadRequest)
+			return
+		}
+	} else if _, _, err := s.store.CompleteResourceOrder(orderNo, tradeNo, amountCents); err != nil {
 		http.Error(w, "fail", http.StatusBadRequest)
 		return
 	}

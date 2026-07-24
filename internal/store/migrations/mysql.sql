@@ -14,6 +14,42 @@ CREATE TABLE IF NOT EXISTS site_settings (
   updated_at DATETIME(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS membership_settings (
+  id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  default_withdrawal_fee_bps INT NOT NULL DEFAULT 300,
+  default_service_fee_bps INT NOT NULL DEFAULT 500,
+  name VARCHAR(80) NOT NULL DEFAULT '社区会员',
+  badge_label VARCHAR(40) NOT NULL DEFAULT '会员',
+  badge_url VARCHAR(500) NOT NULL DEFAULT '',
+  badge_color VARCHAR(32) NOT NULL DEFAULT '#f59e0b',
+  monthly_price_cents BIGINT NOT NULL DEFAULT 0,
+  quarterly_price_cents BIGINT NOT NULL DEFAULT 0,
+  yearly_price_cents BIGINT NOT NULL DEFAULT 0,
+  post_review_exempt TINYINT(1) NOT NULL DEFAULT 0,
+  updated_at DATETIME(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS membership_tiers (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  name VARCHAR(80) NOT NULL,
+  badge_label VARCHAR(40) NOT NULL,
+  badge_url VARCHAR(500) NOT NULL DEFAULT '',
+  badge_color VARCHAR(32) NOT NULL DEFAULT '#f59e0b',
+  monthly_price_cents BIGINT NOT NULL DEFAULT 0,
+  quarterly_price_cents BIGINT NOT NULL DEFAULT 0,
+  yearly_price_cents BIGINT NOT NULL DEFAULT 0,
+  post_review_exempt TINYINT(1) NOT NULL DEFAULT 0,
+  feed_priority TINYINT(1) NOT NULL DEFAULT 0,
+  withdrawal_fee_bps INT NOT NULL DEFAULT 300,
+  service_fee_bps INT NOT NULL DEFAULT 500,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_membership_tiers_enabled_sort (enabled, sort_order, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS captcha_settings (
   id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
@@ -47,14 +83,21 @@ CREATE TABLE IF NOT EXISTS users (
   bio VARCHAR(500) NOT NULL DEFAULT '',
   role VARCHAR(24) NOT NULL DEFAULT 'user',
   status VARCHAR(24) NOT NULL DEFAULT 'active',
+  profile_status VARCHAR(24) NOT NULL DEFAULT 'active',
   blue_verified TINYINT(1) NOT NULL DEFAULT 0,
   verification_label VARCHAR(80) NOT NULL DEFAULT '',
+  membership_tier_id BIGINT NULL,
+  membership_started_at DATETIME(6) NULL,
+  membership_expires_at DATETIME(6) NULL,
   roblox_name VARCHAR(120) NOT NULL DEFAULT '',
   roblox_id VARCHAR(64) NOT NULL DEFAULT '',
   roblox_verified TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
-  INDEX idx_users_status_created (status, created_at)
+  INDEX idx_users_status_created (status, created_at),
+  INDEX idx_users_profile_status_created (profile_status, created_at),
+  INDEX idx_users_membership_tier (membership_tier_id, membership_expires_at),
+  INDEX idx_users_membership_expires (membership_expires_at, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS user_follows (
@@ -186,9 +229,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   kind VARCHAR(32) NOT NULL,
   post_id BIGINT NULL,
   comment_id BIGINT NULL,
+  conversation_id BIGINT NULL,
   created_at DATETIME(6) NOT NULL,
   read_at DATETIME(6) NULL,
   INDEX idx_notifications_user (user_id, read_at, created_at),
+  INDEX idx_notifications_conversation (conversation_id, created_at),
   CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_notifications_actor FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_notifications_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
@@ -229,6 +274,36 @@ CREATE TABLE IF NOT EXISTS resource_files (
   CONSTRAINT fk_resource_files_resource FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS resource_media (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  resource_id BIGINT NOT NULL,
+  stored_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(160) NOT NULL,
+  width INT NOT NULL,
+  height INT NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uniq_resource_media_stored_name (stored_name),
+  INDEX idx_resource_media_resource (resource_id, sort_order, id),
+  CONSTRAINT fk_resource_media_resource FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comment_media (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  comment_id BIGINT NOT NULL,
+  stored_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(160) NOT NULL,
+  width INT NOT NULL,
+  height INT NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uniq_comment_media_stored_name (stored_name),
+  INDEX idx_comment_media_comment (comment_id, sort_order, id),
+  CONSTRAINT fk_comment_media_comment FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS moderation_actions (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   actor_id BIGINT NOT NULL,
@@ -239,6 +314,26 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
   created_at DATETIME(6) NOT NULL,
   INDEX idx_moderation_target (target_type, target_id, created_at),
   CONSTRAINT fk_moderation_actor FOREIGN KEY (actor_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS content_reports (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  reporter_id BIGINT NOT NULL,
+  target_type VARCHAR(24) NOT NULL,
+  target_id BIGINT NOT NULL,
+  target_user_id BIGINT NOT NULL,
+  reason VARCHAR(500) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  review_note VARCHAR(500) NOT NULL DEFAULT '',
+  reviewed_by BIGINT NULL,
+  reviewed_at DATETIME(6) NULL,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_content_reports_queue (status, created_at),
+  INDEX idx_content_reports_target (target_type, target_id, status, created_at),
+  INDEX idx_content_reports_reporter_target (reporter_id, target_type, target_id, status),
+  CONSTRAINT fk_content_reports_reporter FOREIGN KEY (reporter_id) REFERENCES users(id),
+  CONSTRAINT fk_content_reports_target_user FOREIGN KEY (target_user_id) REFERENCES users(id),
+  CONSTRAINT fk_content_reports_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS payment_settings (
@@ -260,6 +355,11 @@ CREATE TABLE IF NOT EXISTS commerce_orders (
   user_id BIGINT NOT NULL,
   resource_id BIGINT NOT NULL,
   amount_cents BIGINT NOT NULL,
+  service_fee_bps INT NOT NULL DEFAULT 0,
+  service_fee_cents BIGINT NOT NULL DEFAULT 0,
+  creator_share_cents BIGINT NOT NULL DEFAULT 0,
+  seller_membership_tier_id BIGINT NULL,
+  seller_membership_tier_name VARCHAR(80) NOT NULL DEFAULT '',
   status VARCHAR(24) NOT NULL DEFAULT 'pending',
   gateway_trade_no VARCHAR(255) NOT NULL DEFAULT '',
   paid_at DATETIME(6) NULL,
@@ -281,6 +381,19 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
   CONSTRAINT fk_payment_transactions_order FOREIGN KEY (order_id) REFERENCES commerce_orders(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS resource_purchases (
+  user_id BIGINT NOT NULL,
+  resource_id BIGINT NOT NULL,
+  order_id BIGINT NOT NULL,
+  purchased_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (user_id, resource_id),
+  UNIQUE KEY uniq_resource_purchases_order (order_id),
+  INDEX idx_resource_purchases_resource (resource_id, purchased_at),
+  CONSTRAINT fk_resource_purchases_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_resource_purchases_resource FOREIGN KEY (resource_id) REFERENCES resources(id),
+  CONSTRAINT fk_resource_purchases_order FOREIGN KEY (order_id) REFERENCES commerce_orders(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS wallet_ledgers (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT NOT NULL,
@@ -295,10 +408,34 @@ CREATE TABLE IF NOT EXISTS wallet_ledgers (
   CONSTRAINT fk_wallet_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS membership_orders (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_no VARCHAR(64) NOT NULL UNIQUE,
+  user_id BIGINT NOT NULL,
+  membership_tier_id BIGINT NULL,
+  tier_name VARCHAR(80) NOT NULL DEFAULT '',
+  plan VARCHAR(16) NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  duration_months INT NOT NULL,
+  started_at DATETIME(6) NOT NULL,
+  expires_at DATETIME(6) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'paid',
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_membership_orders_user (user_id, created_at),
+  INDEX idx_membership_orders_status (status, created_at),
+  CONSTRAINT fk_membership_orders_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS creator_payouts (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   creator_id BIGINT NOT NULL,
   amount_cents BIGINT NOT NULL,
+  withdrawal_fee_bps INT NOT NULL DEFAULT 0,
+  withdrawal_fee_cents BIGINT NOT NULL DEFAULT 0,
+  net_amount_cents BIGINT NOT NULL DEFAULT 0,
+  membership_tier_id BIGINT NULL,
+  membership_tier_name VARCHAR(80) NOT NULL DEFAULT '',
   status VARCHAR(24) NOT NULL DEFAULT 'pending',
   payout_method VARCHAR(32) NOT NULL DEFAULT 'alipay',
   payout_account VARCHAR(255) NOT NULL DEFAULT '',
@@ -394,18 +531,38 @@ CREATE TABLE IF NOT EXISTS conversations (
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
   INDEX idx_conversations_updated (updated_at),
+  INDEX idx_conversations_creator_kind_created (created_by, kind, created_at),
   CONSTRAINT fk_conversations_creator FOREIGN KEY (created_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS conversation_members (
   conversation_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL,
+  membership_status VARCHAR(16) NOT NULL DEFAULT 'accepted',
+  invited_by BIGINT NULL,
   joined_at DATETIME(6) NOT NULL,
   last_read_at DATETIME(6) NULL,
+  responded_at DATETIME(6) NULL,
+  last_notified_at DATETIME(6) NULL,
   PRIMARY KEY (conversation_id, user_id),
   INDEX idx_conversation_members_user (user_id, conversation_id),
+  INDEX idx_conversation_members_user_status (user_id, membership_status, conversation_id),
   CONSTRAINT fk_conversation_members_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   CONSTRAINT fk_conversation_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS conversation_invite_links (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  conversation_id BIGINT NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  expires_at DATETIME(6) NOT NULL,
+  revoked_at DATETIME(6) NULL,
+  UNIQUE KEY uq_conversation_invite_token (token_hash),
+  INDEX idx_conversation_invite_active (conversation_id, revoked_at, expires_at),
+  CONSTRAINT fk_conversation_invite_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_conversation_invite_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -418,6 +575,40 @@ CREATE TABLE IF NOT EXISTS messages (
   INDEX idx_messages_conversation (conversation_id, created_at, id),
   CONSTRAINT fk_messages_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   CONSTRAINT fk_messages_sender FOREIGN KEY (sender_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS wallet_topup_orders (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_no VARCHAR(64) NOT NULL,
+  user_id BIGINT NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  gateway_trade_no VARCHAR(255) NULL,
+  paid_at DATETIME(6) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_wallet_topup_order_no (order_no),
+  UNIQUE KEY uq_wallet_topup_gateway_trade (gateway_trade_no),
+  INDEX idx_wallet_topup_user_status (user_id, status, created_at),
+  CONSTRAINT fk_wallet_topup_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS redeem_codes (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  code_hash BINARY(32) NOT NULL,
+  code_hint VARCHAR(32) NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  expires_at DATETIME(6) NULL,
+  redeemed_by BIGINT NULL,
+  redeemed_at DATETIME(6) NULL,
+  revoked_at DATETIME(6) NULL,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_redeem_code_hash (code_hash),
+  INDEX idx_redeem_codes_created (created_at),
+  INDEX idx_redeem_codes_redeemed (redeemed_by, redeemed_at),
+  CONSTRAINT fk_redeem_code_user FOREIGN KEY (redeemed_by) REFERENCES users(id),
+  CONSTRAINT fk_redeem_code_creator FOREIGN KEY (created_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS oauth_settings (
@@ -455,4 +646,17 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
   expires_at DATETIME(6) NOT NULL,
   created_at DATETIME(6) NOT NULL,
   INDEX idx_oauth_states_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS content_moderation_audits (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  actor_id BIGINT NULL,
+  content_type VARCHAR(32) NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  decision VARCHAR(16) NOT NULL,
+  reason VARCHAR(200) NOT NULL DEFAULT '',
+  model VARCHAR(128) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_content_moderation_actor_created (actor_id, created_at),
+  INDEX idx_content_moderation_type_created (content_type, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

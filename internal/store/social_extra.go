@@ -106,6 +106,14 @@ func createNotification(tx *sql.Tx, userID, actorID int64, kind string, postID, 
 	return err
 }
 
+func createConversationNotification(tx *sql.Tx, userID, actorID int64, kind string, conversationID int64, createdAt time.Time) error {
+	if userID <= 0 || actorID <= 0 || conversationID <= 0 || userID == actorID {
+		return nil
+	}
+	_, err := tx.Exec(`INSERT INTO notifications (user_id, actor_id, kind, conversation_id, created_at) VALUES (?, ?, ?, ?, ?)`, userID, actorID, kind, conversationID, createdAt)
+	return err
+}
+
 func (s *Store) TogglePostBookmark(userID, postID int64) (bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -204,40 +212,56 @@ func (s *Store) RepostStatus(userID, postID int64) (bool, int64, error) {
 }
 
 func (s *Store) ListFollowingPosts(userID int64, limit int) ([]domain.Post, error) {
+	page, err := s.ListFollowingPostsPage(userID, limit, 0)
+	return page.Items, err
+}
+
+func (s *Store) ListFollowingPostsPage(userID int64, limit, offset int) (domain.PostPage, error) {
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND (p.author_id = ? OR EXISTS (SELECT 1 FROM user_follows uf WHERE uf.follower_id = ? AND uf.followed_id = p.author_id)) AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE (ub.blocker_id = ? AND ub.blocked_id = p.author_id) OR (ub.blocker_id = p.author_id AND ub.blocked_id = ?)) ORDER BY p.pinned DESC, p.updated_at DESC LIMIT ?`, userID, userID, userID, userID, limit)
+	if offset < 0 || offset > 100000 {
+		offset = 0
+	}
+	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND (p.author_id = ? OR EXISTS (SELECT 1 FROM user_follows uf WHERE uf.follower_id = ? AND uf.followed_id = p.author_id)) AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE (ub.blocker_id = ? AND ub.blocked_id = p.author_id) OR (ub.blocker_id = p.author_id AND ub.blocked_id = ?)) ORDER BY p.pinned DESC, p.updated_at DESC LIMIT ? OFFSET ?`, userID, userID, userID, userID, limit+1, offset)
 	if err != nil {
-		return nil, err
+		return domain.PostPage{}, err
 	}
 	defer rows.Close()
-	result := make([]domain.Post, 0)
+	result := make([]domain.Post, 0, limit+1)
 	for rows.Next() {
 		var item domain.Post
-		var authorVerified, pinned, featured int
-		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
+		var authorVerified, authorMember, pinned, featured int
+		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return domain.PostPage{}, err
 		}
 		item.AuthorVerified = authorVerified != 0
+		item.AuthorMember = authorMember != 0
 		item.Pinned = pinned != 0
 		item.Featured = featured != 0
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return domain.PostPage{}, err
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
 	}
 	if err := attachPostMedia(s.db, result); err != nil {
-		return nil, err
+		return domain.PostPage{}, err
 	}
-	return result, nil
+	if err := s.MarkPostsLikedBy(userID, result); err != nil {
+		return domain.PostPage{}, err
+	}
+	return domain.PostPage{Items: result, NextOffset: offset + len(result), HasMore: hasMore}, nil
 }
 
 func (s *Store) ListBookmarkedPosts(userID int64, limit int) ([]domain.Post, error) {
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM post_bookmarks pb JOIN posts p ON p.id = pb.post_id JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE pb.user_id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' ORDER BY pb.created_at DESC LIMIT ?`, userID, limit)
+	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM post_bookmarks pb JOIN posts p ON p.id = pb.post_id JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE pb.user_id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' ORDER BY pb.created_at DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -245,11 +269,12 @@ func (s *Store) ListBookmarkedPosts(userID int64, limit int) ([]domain.Post, err
 	result := make([]domain.Post, 0)
 	for rows.Next() {
 		var item domain.Post
-		var authorVerified, pinned, featured int
-		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var authorVerified, authorMember, pinned, featured int
+		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.AuthorVerified = authorVerified != 0
+		item.AuthorMember = authorMember != 0
 		item.Pinned = pinned != 0
 		item.Featured = featured != 0
 		item.Bookmarked = true
@@ -268,7 +293,7 @@ func (s *Store) ListNotifications(userID int64, limit int) ([]domain.Notificatio
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT n.id, n.kind, n.actor_id, u.display_name, u.avatar_url, n.post_id, n.comment_id, COALESCE(p.title, ''), n.read_at, n.created_at FROM notifications n JOIN users u ON u.id = n.actor_id LEFT JOIN posts p ON p.id = n.post_id WHERE n.user_id = ? AND u.status = 'active' ORDER BY n.created_at DESC, n.id DESC LIMIT ?`, userID, limit)
+	rows, err := s.db.Query(`SELECT n.id, n.kind, n.actor_id, u.display_name, u.avatar_url, n.post_id, n.comment_id, n.conversation_id, COALESCE(p.title, ''), COALESCE(c.name, ''), n.read_at, n.created_at FROM notifications n JOIN users u ON u.id = n.actor_id LEFT JOIN posts p ON p.id = n.post_id LEFT JOIN conversations c ON c.id = n.conversation_id WHERE n.user_id = ? AND u.status = 'active' ORDER BY n.created_at DESC, n.id DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -276,9 +301,9 @@ func (s *Store) ListNotifications(userID int64, limit int) ([]domain.Notificatio
 	result := make([]domain.Notification, 0)
 	for rows.Next() {
 		var item domain.Notification
-		var postID, commentID sql.NullInt64
+		var postID, commentID, conversationID sql.NullInt64
 		var readAt sql.NullTime
-		if err := rows.Scan(&item.ID, &item.Kind, &item.ActorID, &item.ActorName, &item.ActorAvatar, &postID, &commentID, &item.PostTitle, &readAt, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Kind, &item.ActorID, &item.ActorName, &item.ActorAvatar, &postID, &commentID, &conversationID, &item.PostTitle, &item.ConversationName, &readAt, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		if postID.Valid {
@@ -286,6 +311,9 @@ func (s *Store) ListNotifications(userID int64, limit int) ([]domain.Notificatio
 		}
 		if commentID.Valid {
 			item.CommentID = &commentID.Int64
+		}
+		if conversationID.Valid {
+			item.ConversationID = &conversationID.Int64
 		}
 		item.Read = readAt.Valid
 		result = append(result, item)

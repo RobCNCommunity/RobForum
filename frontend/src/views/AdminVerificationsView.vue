@@ -46,7 +46,7 @@ async function submitReview() {
   reviewingID.value = review.item.id
   try {
     await reviewVerificationApplication(review.item.id, review.status, review.label.trim(), review.note.trim())
-    Notify.success(review.status === 'approved' ? '认证已通过，蓝标已生效' : '认证申请已驳回')
+    Notify.success(review.status === 'approved' ? '认证已通过，蓝标已生效' : review.item.status === 'approved' ? '认证已撤销，用户蓝标已取消' : '认证申请已驳回')
     modalOpen.value = false
     review.item = null
     await load()
@@ -77,10 +77,11 @@ onMounted(load)
         <div data-label="证明材料"><a :href="item.evidence_url" target="_blank" rel="noreferrer">打开公开材料 <AppIcon name="arrow" size="14" /></a><small>{{ item.statement }}</small></div>
         <div data-label="状态"><span class="rf-status-chip" :class="item.status === 'approved' ? 'is-on' : item.status === 'rejected' ? 'is-danger' : 'is-warning'">{{ statusLabel(item.status) }}</span></div>
         <div v-if="item.status === 'pending'" data-label="操作" class="rf-row-actions"><button type="button" class="rf-primary-button rf-button-small" @click="openReview(item, 'approved')">通过</button><button type="button" class="rf-danger-button rf-button-small" @click="openReview(item, 'rejected')">驳回</button></div>
+        <div v-else-if="item.status === 'approved'" data-label="操作" class="rf-row-actions"><button type="button" class="rf-danger-button rf-button-small" @click="openReview(item, 'rejected')">撤销认证</button></div>
         <div v-else data-label="处理结果"><small>{{ item.review_note || '已处理' }}</small></div>
       </article>
     </div>
 
-    <div v-if="modalOpen" class="rf-modal-backdrop rf-modal-backdrop--center" @click.self="closeReview"><section class="rf-dialog" role="dialog" aria-modal="true" :aria-label="review.status === 'approved' ? '通过蓝微认证' : '驳回认证申请'"><header><div><h2>{{ review.status === 'approved' ? '通过蓝微认证' : '驳回认证申请' }}</h2><p v-if="review.item">{{ review.item.user_name }} · {{ typeLabel(review.item.verification_type) }}</p></div><button type="button" class="rf-icon-button" aria-label="关闭" @click="closeReview"><AppIcon name="close" size="18" /></button></header><label v-if="review.status === 'approved'" class="rf-field-label"><span>显示认证名称</span><input v-model="review.label" class="rf-control" maxlength="80" /></label><label class="rf-field-label"><span>审核备注</span><textarea v-model="review.note" class="rf-control rf-textarea" rows="4" maxlength="500" placeholder="填写通过说明或驳回原因" /></label><footer><button type="button" class="rf-secondary-button" :disabled="reviewingID !== null" @click="closeReview">取消</button><nut-button :type="review.status === 'approved' ? 'primary' : 'danger'" :loading="reviewingID !== null" @click="submitReview">{{ review.status === 'approved' ? '确认通过' : '确认驳回' }}</nut-button></footer></section></div>
+    <div v-if="modalOpen" class="rf-modal-backdrop rf-modal-backdrop--center" @click.self="closeReview"><section class="rf-dialog" role="dialog" aria-modal="true" :aria-label="review.status === 'approved' ? '通过蓝微认证' : review.item?.status === 'approved' ? '撤销蓝微认证' : '驳回认证申请'"><header><div><h2>{{ review.status === 'approved' ? '通过蓝微认证' : review.item?.status === 'approved' ? '撤销蓝微认证' : '驳回认证申请' }}</h2><p v-if="review.item">{{ review.item.user_name }} · {{ typeLabel(review.item.verification_type) }}</p></div><button type="button" class="rf-icon-button" aria-label="关闭" @click="closeReview"><AppIcon name="close" size="18" /></button></header><label v-if="review.status === 'approved'" class="rf-field-label"><span>显示认证名称</span><input v-model="review.label" class="rf-control" maxlength="80" /></label><label class="rf-field-label"><span>{{ review.item?.status === 'approved' ? '撤销原因' : '审核备注' }}</span><textarea v-model="review.note" class="rf-control rf-textarea" rows="4" maxlength="500" :placeholder="review.item?.status === 'approved' ? '请填写撤销认证的原因' : '填写通过说明或驳回原因'" /></label><footer><button type="button" class="rf-secondary-button" :disabled="reviewingID !== null" @click="closeReview">取消</button><nut-button :type="review.status === 'approved' ? 'primary' : 'danger'" :loading="reviewingID !== null" @click="submitReview">{{ review.status === 'approved' ? '确认通过' : review.item?.status === 'approved' ? '确认撤销' : '确认驳回' }}</nut-button></footer></section></div>
   </PageContainer>
 </template>

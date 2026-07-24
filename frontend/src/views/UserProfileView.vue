@@ -8,6 +8,7 @@ import {
   fetchBlockStatus,
   fetchFollowStatus,
   fetchUserProfile,
+  reportUserProfile,
   setUserBlocked,
   setUserFollowing,
   type FollowStatus,
@@ -16,10 +17,12 @@ import {
 } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
+import ContentReportDialog from '@/components/ContentReportDialog.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import PostMediaGrid from '@/components/PostMediaGrid.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
+import MembershipBadge from '@/components/MembershipBadge.vue'
 import { postTypeLabel } from '@/postTypes'
 
 const route = useRoute()
@@ -32,6 +35,8 @@ const blocked = ref(false)
 const acting = ref(false)
 const userMenuOpen = ref(false)
 const profileTab = ref<'posts' | 'resources'>('posts')
+const reportOpen = ref(false)
+const reporting = ref(false)
 
 const isMe = computed(() => !!profile.value && auth.user?.id === profile.value.user.id)
 const postCountLabel = computed(() => `${profile.value?.posts.length || 0} 条动态`)
@@ -146,6 +151,30 @@ async function toggleBlock() {
   }
 }
 
+function openProfileReport() {
+  if (!profile.value || isMe.value) return
+  userMenuOpen.value = false
+  if (!auth.user) {
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  reportOpen.value = true
+}
+
+async function submitProfileReport(reason: string) {
+  if (!profile.value || reporting.value) return
+  reporting.value = true
+  try {
+    await reportUserProfile(profile.value.user.id, reason)
+    reportOpen.value = false
+    Notify.success('举报已提交，审核结果会通知你')
+  } catch (error) {
+    Notify.danger(errorMessage(error, '举报提交失败'))
+  } finally {
+    reporting.value = false
+  }
+}
+
 watch(() => route.params.userID, () => {
   profileTab.value = 'posts'
   load()
@@ -177,7 +206,7 @@ onMounted(load)
           <img v-if="profile.user.cover_url" :src="profile.user.cover_url" alt="" />
         </div>
         <div class="rf-x-profile-action-row">
-          <UserAvatar class="rf-x-profile-avatar" :src="profile.user.avatar_url" :name="profile.user.display_name" :size="132" />
+          <UserAvatar class="rf-x-profile-avatar" :src="profile.user.avatar_url" :name="profile.user.display_name" :size="104" />
           <div class="rf-x-profile-actions">
             <RouterLink v-if="isMe" to="/settings/profile" class="rf-x-outline-button">编辑个人资料</RouterLink>
             <template v-else>
@@ -191,6 +220,7 @@ onMounted(load)
                 <Transition name="rf-x-menu">
                   <div v-if="userMenuOpen" class="rf-x-user-menu-panel">
                     <button type="button" :disabled="acting" @click="toggleBlock">{{ blocked ? '解除拉黑' : '拉黑此用户' }}</button>
+                    <button type="button" class="danger" :disabled="reporting" @click="openProfileReport">举报此用户</button>
                   </div>
                 </Transition>
               </div>
@@ -204,7 +234,7 @@ onMounted(load)
         <div class="rf-x-profile-copy">
           <div class="rf-x-profile-name">
             <h1>{{ profile.user.display_name }}</h1>
-            <VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" />
+            <VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" /><MembershipBadge :active="profile.user.member_active" :tier-id="profile.user.membership_tier_id" />
           </div>
           <span class="rf-x-profile-handle">{{ profileHandle }}</span>
           <p v-if="profile.user.bio" class="rf-x-profile-bio">{{ profile.user.bio }}</p>
@@ -234,7 +264,7 @@ onMounted(load)
                 <div class="rf-x-post-body">
                   <div class="rf-x-post-meta">
                     <strong>{{ profile.user.display_name }}</strong>
-                    <VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" />
+                    <VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" /><MembershipBadge :active="profile.user.member_active" :tier-id="profile.user.membership_tier_id" />
                     <span class="rf-x-post-handle">{{ profileHandle }}</span><span>·</span><time>{{ formatTimelineDate(post.created_at) }}</time>
                     <span class="rf-x-post-more"><AppIcon name="more" size="18" /></span>
                   </div>
@@ -261,7 +291,7 @@ onMounted(load)
                 <UserAvatar :src="profile.user.avatar_url" :name="profile.user.display_name" :size="42" />
                 <div>
                   <header>
-                    <span><strong>{{ profile.user.display_name }}</strong><VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" /><small>{{ profileHandle }}</small></span>
+                    <span><strong>{{ profile.user.display_name }}</strong><VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" /><MembershipBadge :active="profile.user.member_active" :tier-id="profile.user.membership_tier_id" /><small>{{ profileHandle }}</small></span>
                     <b>{{ formatMoney(item.price_cents) }}</b>
                   </header>
                   <div class="rf-x-post-context">{{ item.resource_type || '资源' }} · {{ item.game || 'Roblox' }}</div>
@@ -280,6 +310,7 @@ onMounted(load)
         </section>
       </Transition>
     </div>
+    <ContentReportDialog :open="reportOpen" :target-label="profile ? `用户：${profile.user.display_name}` : ''" :submitting="reporting" @close="reportOpen = false" @submit="submitProfileReport" />
   </PageContainer>
 </template>
 
@@ -295,8 +326,8 @@ onMounted(load)
 .rf-x-round-button:disabled { cursor: not-allowed; opacity: .45; }
 .rf-x-profile-cover { width: 100%; aspect-ratio: 3 / 1; overflow: hidden; background: #cfd9de; }
 .rf-x-profile-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.rf-x-profile-action-row { position: relative; display: flex; min-height: 76px; align-items: flex-start; justify-content: flex-end; padding: 12px 16px 0; }
-.rf-x-profile-avatar { position: absolute; bottom: 10px; left: 16px; width: 132px !important; height: 132px !important; flex-basis: 132px !important; border: 4px solid var(--rf-bg); background: var(--rf-bg-subtle); box-shadow: none !important; }
+.rf-x-profile-action-row { position: relative; display: flex; min-height: 64px; align-items: flex-start; justify-content: flex-end; padding: 12px 16px 0; }
+.rf-x-profile-avatar { position: absolute; bottom: 10px; left: 16px; width: 104px !important; height: 104px !important; flex-basis: 104px !important; border: 4px solid var(--rf-bg); background: var(--rf-bg-subtle); box-shadow: none !important; }
 .rf-x-profile-actions { display: flex; min-height: 44px; align-items: center; justify-content: flex-end; gap: 8px; }
 .rf-x-outline-button, .rf-x-follow-button { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; padding: 0 17px; border: 1px solid var(--rf-faint); border-radius: var(--rf-pill); color: var(--rf-text); background: var(--rf-bg); font-size: 14px; font-weight: 700; transition: background-color 150ms ease-out, border-color 150ms ease-out, transform 100ms ease-out; }
 .rf-x-outline-button:hover, .rf-x-follow-button.following:hover { color: var(--rf-text); background: var(--rf-bg-hover); }
@@ -308,8 +339,10 @@ onMounted(load)
 .rf-x-outline-control { width: 36px; height: 36px; flex-basis: 36px; border: 1px solid var(--rf-faint); }
 .rf-x-user-menu { position: relative; }
 .rf-x-user-menu-panel { position: absolute; z-index: 20; top: 42px; right: 0; width: max-content; min-width: 154px; overflow: hidden; border: 1px solid var(--rf-line); border-radius: 12px; background: var(--rf-bg); box-shadow: 0 8px 30px rgba(15, 20, 25, .16); }
-.rf-x-user-menu-panel button { width: 100%; min-height: 44px; padding: 0 16px; color: var(--rf-danger); background: transparent; font-weight: 700; text-align: left; }
-.rf-x-user-menu-panel button:hover { background: color-mix(in srgb, var(--rf-danger) 8%, transparent); }
+.rf-x-user-menu-panel button { width: 100%; min-height: 44px; padding: 0 16px; color: var(--rf-text); background: transparent; font-weight: 700; text-align: left; }
+.rf-x-user-menu-panel button:hover { background: var(--rf-bg-hover); }
+.rf-x-user-menu-panel button.danger { color: var(--rf-danger); }
+.rf-x-user-menu-panel button.danger:hover { background: color-mix(in srgb, var(--rf-danger) 8%, transparent); }
 .rf-x-menu-enter-active { transition: opacity 160ms ease-out, transform 180ms cubic-bezier(.22, 1, .36, 1); }
 .rf-x-menu-leave-active { transition: opacity 100ms ease-in, transform 100ms ease-in; }
 .rf-x-menu-enter-from, .rf-x-menu-leave-to { opacity: 0; transform: translateY(-5px) scale(.97); }
@@ -372,8 +405,9 @@ onMounted(load)
 @media (max-width: 560px) {
   .rf-x-profile-header { padding-inline: 10px; }
   .rf-x-profile-cover { aspect-ratio: 3 / 1; }
-  .rf-x-profile-action-row { min-height: 63px; padding: 10px 12px 0; }
-  .rf-x-profile-avatar { bottom: 7px; left: 12px; width: 92px !important; height: 92px !important; flex-basis: 92px !important; border-width: 3px; }
+  .rf-x-profile-action-row { min-height: 54px; padding: 10px 12px 0; }
+  .rf-x-profile-avatar { bottom: 7px; left: 12px; width: 80px !important; height: 80px !important; flex-basis: 80px !important; border-width: 3px; }
+  .rf-x-profile-loading-body > span { width: 80px; height: 80px; margin-top: -40px; border-width: 3px; }
   .rf-x-profile-actions { gap: 6px; }
   .rf-x-profile-copy { padding: 0 12px 15px; }
   .rf-x-profile-name h1 { font-size: 20px; }

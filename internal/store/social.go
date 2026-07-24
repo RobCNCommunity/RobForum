@@ -11,16 +11,31 @@ import (
 	"roblox-community/internal/domain"
 )
 
+var (
+	ErrGroupCreationRateLimited        = errors.New("群聊创建过于频繁，请一分钟后再试")
+	ErrGroupInviteReminderRateLimited  = errors.New("已提醒过待确认成员，请一分钟后再试")
+	ErrNoPendingGroupInvites           = errors.New("没有待确认的群聊邀请")
+	ErrGroupInviteReminderNotPermitted = errors.New("只有群主可以提醒待确认成员")
+)
+
 func (s *Store) SearchUsers(query string, limit int, hotOnly bool) ([]domain.UserSearchResult, error) {
+	page, err := s.SearchUsersPage(query, limit, 0, hotOnly)
+	return page.Items, err
+}
+
+func (s *Store) SearchUsersPage(query string, limit, offset int, hotOnly bool) (domain.UserSearchPage, error) {
 	query = strings.TrimSpace(query)
 	if len([]rune(query)) > 80 {
-		return nil, errors.New("search query is too long")
+		return domain.UserSearchPage{}, errors.New("search query is too long")
 	}
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	where := `u.status = 'active'`
-	args := make([]any, 0, 3)
+	if offset < 0 || offset > 100000 {
+		offset = 0
+	}
+	where := `u.status = 'active' AND u.profile_status = 'active'`
+	args := make([]any, 0, 5)
 	if query != "" {
 		where += ` AND (u.display_name LIKE ? ESCAPE '\\' OR u.roblox_name LIKE ? ESCAPE '\\')`
 		pattern := "%" + escapeLike(query) + "%"
@@ -31,9 +46,9 @@ func (s *Store) SearchUsers(query string, limit int, hotOnly bool) ([]domain.Use
 		order = `CASE WHEN u.display_name = ? THEN 0 ELSE 1 END, hot_score DESC, u.created_at DESC`
 		args = append(args, query)
 	}
-	args = append(args, limit)
+	args = append(args, limit+1, offset)
 	rows, err := s.db.Query(`SELECT
-		u.id, u.display_name, u.avatar_url, u.cover_url, u.bio, u.blue_verified, u.verification_label,
+		u.id, u.display_name, u.avatar_url, u.cover_url, u.bio, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END,
 		u.roblox_name, u.roblox_verified, u.created_at,
 		(SELECT COUNT(*) FROM posts p JOIN boards pb ON pb.id = p.board_id WHERE p.author_id = u.id AND p.status = 'published' AND pb.status = 'active') AS post_count,
 		(SELECT COUNT(*) FROM resources r WHERE r.creator_id = u.id AND r.status = 'approved') AS resource_count,
@@ -42,23 +57,31 @@ func (s *Store) SearchUsers(query string, limit int, hotOnly bool) ([]domain.Use
 		 (SELECT COUNT(*) FROM comments c JOIN posts cp ON cp.id = c.post_id JOIN boards cb ON cb.id = cp.board_id WHERE c.author_id = u.id AND c.status = 'published' AND cp.status = 'published' AND cb.status = 'active') +
 		 (SELECT COUNT(*) FROM post_likes pl JOIN posts p2 ON p2.id = pl.post_id JOIN boards pb2 ON pb2.id = p2.board_id WHERE p2.author_id = u.id AND p2.status = 'published' AND pb2.status = 'active') * 2 +
 		 (SELECT COUNT(*) FROM comment_likes cl JOIN comments c2 ON c2.id = cl.comment_id JOIN posts cp2 ON cp2.id = c2.post_id JOIN boards cb2 ON cb2.id = cp2.board_id WHERE c2.author_id = u.id AND c2.status = 'published' AND cp2.status = 'published' AND cb2.status = 'active')) AS hot_score
-		FROM users u WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
+		FROM users u WHERE `+where+` ORDER BY `+order+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
-		return nil, err
+		return domain.UserSearchPage{}, err
 	}
 	defer rows.Close()
-	result := make([]domain.UserSearchResult, 0)
+	result := make([]domain.UserSearchResult, 0, limit+1)
 	for rows.Next() {
 		var item domain.UserSearchResult
-		var blue, roblox int
-		if err := rows.Scan(&item.ID, &item.DisplayName, &item.AvatarURL, &item.CoverURL, &item.Bio, &blue, &item.VerificationLabel, &item.RobloxName, &roblox, &item.CreatedAt, &item.PostCount, &item.ResourceCount, &item.HotScore); err != nil {
-			return nil, err
+		var blue, member, roblox int
+		if err := rows.Scan(&item.ID, &item.DisplayName, &item.AvatarURL, &item.CoverURL, &item.Bio, &blue, &item.VerificationLabel, &member, &item.MembershipTierID, &item.RobloxName, &roblox, &item.CreatedAt, &item.PostCount, &item.ResourceCount, &item.HotScore); err != nil {
+			return domain.UserSearchPage{}, err
 		}
 		item.BlueVerified = blue != 0
+		item.MemberActive = member != 0
 		item.RobloxVerified = roblox != 0
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return domain.UserSearchPage{}, err
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
+	}
+	return domain.UserSearchPage{Items: result, NextOffset: offset + len(result), HasMore: hasMore}, nil
 }
 
 func (s *Store) SetUserBlocked(blockerID, blockedID int64, blocked bool) error {
@@ -144,7 +167,7 @@ func lockConversationMembers(tx *sql.Tx, userID, conversationID int64) (string, 
 		}
 		return "", nil, err
 	}
-	rows, err := tx.Query(`SELECT user_id FROM conversation_members WHERE conversation_id = ? ORDER BY user_id FOR UPDATE`, conversationID)
+	rows, err := tx.Query(`SELECT user_id, membership_status FROM conversation_members WHERE conversation_id = ? ORDER BY user_id FOR UPDATE`, conversationID)
 	if err != nil {
 		return "", nil, err
 	}
@@ -152,12 +175,15 @@ func lockConversationMembers(tx *sql.Tx, userID, conversationID int64) (string, 
 	allowed := false
 	for rows.Next() {
 		var memberID int64
-		if err := rows.Scan(&memberID); err != nil {
+		var membershipStatus string
+		if err := rows.Scan(&memberID, &membershipStatus); err != nil {
 			rows.Close()
 			return "", nil, err
 		}
-		members = append(members, memberID)
-		allowed = allowed || memberID == userID
+		if membershipStatus == "accepted" {
+			members = append(members, memberID)
+			allowed = allowed || memberID == userID
+		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -241,6 +267,47 @@ func (s *Store) LikeStatus(kind string, userID, targetID int64) (bool, int64, er
 		return false, 0, err
 	}
 	return liked > 0, count, nil
+}
+
+// MarkPostsLikedBy fills the viewer-specific state for a post list in one
+// query. Public timelines can remain public while still showing a signed-in
+// viewer which posts they have already liked.
+func (s *Store) MarkPostsLikedBy(userID int64, posts []domain.Post) error {
+	if userID <= 0 || len(posts) == 0 {
+		return nil
+	}
+
+	indexes := make(map[int64]int, len(posts))
+	placeholders := make([]string, 0, len(posts))
+	args := make([]any, 0, len(posts)+1)
+	args = append(args, userID)
+	for index := range posts {
+		if posts[index].ID <= 0 {
+			continue
+		}
+		indexes[posts[index].ID] = index
+		placeholders = append(placeholders, "?")
+		args = append(args, posts[index].ID)
+	}
+	if len(placeholders) == 0 {
+		return nil
+	}
+
+	rows, err := s.db.Query(`SELECT post_id FROM post_likes WHERE user_id = ? AND post_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var postID int64
+		if err := rows.Scan(&postID); err != nil {
+			return err
+		}
+		if index, ok := indexes[postID]; ok {
+			posts[index].Liked = true
+		}
+	}
+	return rows.Err()
 }
 
 func (s *Store) toggleLike(kind string, userID, targetID int64) (bool, int64, error) {
@@ -386,8 +453,19 @@ func (s *Store) CreateConversation(creatorID int64, kind, name string, memberIDs
 		return domain.Conversation{}, err
 	}
 	defer tx.Rollback()
+	now := time.Now().UTC()
 	if err := lockActiveUsers(tx, members); err != nil {
 		return domain.Conversation{}, err
+	}
+	if kind == "group" {
+		var lastCreated time.Time
+		err := tx.QueryRow(`SELECT created_at FROM conversations WHERE created_by = ? AND kind = 'group' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, creatorID).Scan(&lastCreated)
+		if err == nil && now.Before(lastCreated.Add(time.Minute)) {
+			return domain.Conversation{}, ErrGroupCreationRateLimited
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return domain.Conversation{}, err
+		}
 	}
 	for _, id := range members {
 		if id == creatorID {
@@ -418,7 +496,6 @@ func (s *Store) CreateConversation(creatorID int64, kind, name string, memberIDs
 			return domain.Conversation{}, err
 		}
 	}
-	now := time.Now().UTC()
 	res, err := tx.Exec(`INSERT INTO conversations (kind, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, kind, name, creatorID, now, now)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -428,8 +505,25 @@ func (s *Store) CreateConversation(creatorID int64, kind, name string, memberIDs
 		return domain.Conversation{}, err
 	}
 	for _, memberID := range members {
-		if _, err := tx.Exec(`INSERT INTO conversation_members (conversation_id, user_id, joined_at, last_read_at) VALUES (?, ?, ?, ?)`, id, memberID, now, now); err != nil {
+		membershipStatus := "accepted"
+		var invitedBy any
+		var lastReadAt any = now
+		var respondedAt any = now
+		var lastNotifiedAt any
+		if kind == "group" && memberID != creatorID {
+			membershipStatus = "pending"
+			invitedBy = creatorID
+			lastReadAt = nil
+			respondedAt = nil
+			lastNotifiedAt = now
+		}
+		if _, err := tx.Exec(`INSERT INTO conversation_members (conversation_id, user_id, membership_status, invited_by, joined_at, last_read_at, responded_at, last_notified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, memberID, membershipStatus, invitedBy, now, lastReadAt, respondedAt, lastNotifiedAt); err != nil {
 			return domain.Conversation{}, err
+		}
+		if membershipStatus == "pending" {
+			if err := createConversationNotification(tx, memberID, creatorID, "group_invite", id, now); err != nil {
+				return domain.Conversation{}, err
+			}
 		}
 	}
 	item, err := getConversation(tx, creatorID, id)
@@ -443,7 +537,7 @@ func (s *Store) CreateConversation(creatorID int64, kind, name string, memberIDs
 }
 
 func (s *Store) ListConversations(userID int64) ([]domain.Conversation, error) {
-	rows, err := s.db.Query(`SELECT c.id FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE cm.user_id = ? ORDER BY c.updated_at DESC LIMIT 100`, userID)
+	rows, err := s.db.Query(`SELECT c.id FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE cm.user_id = ? AND cm.membership_status = 'accepted' ORDER BY c.updated_at DESC LIMIT 100`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -472,16 +566,23 @@ func (s *Store) GetConversation(userID, conversationID int64) (domain.Conversati
 }
 
 func getConversation(queryer sqlQueryer, userID, conversationID int64) (domain.Conversation, error) {
+	return getConversationWithMembership(queryer, userID, conversationID, false)
+}
+
+func getConversationWithMembership(queryer sqlQueryer, userID, conversationID int64, allowPending bool) (domain.Conversation, error) {
 	var item domain.Conversation
 	var lastRead sql.NullTime
-	err := queryer.QueryRow(`SELECT c.id, c.kind, c.name, c.created_by, c.created_at, c.updated_at, cm.last_read_at FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.id = ? AND cm.user_id = ?`, conversationID, userID).Scan(&item.ID, &item.Kind, &item.Name, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt, &lastRead)
+	err := queryer.QueryRow(`SELECT c.id, c.kind, c.name, c.created_by, c.created_at, c.updated_at, cm.last_read_at, cm.membership_status FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.id = ? AND cm.user_id = ?`, conversationID, userID).Scan(&item.ID, &item.Kind, &item.Name, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt, &lastRead, &item.MembershipStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return item, errors.New("会话不存在或无权访问")
 		}
 		return item, err
 	}
-	rows, err := queryer.Query(`SELECT u.id, u.display_name, u.avatar_url, u.cover_url, u.bio, u.blue_verified, u.verification_label, u.roblox_name, u.roblox_verified, u.created_at FROM conversation_members cm JOIN users u ON u.id = cm.user_id WHERE cm.conversation_id = ? ORDER BY cm.joined_at`, conversationID)
+	if item.MembershipStatus != "accepted" && (!allowPending || item.MembershipStatus != "pending") {
+		return item, errors.New("会话邀请已失效")
+	}
+	rows, err := queryer.Query(`SELECT u.id, u.display_name, u.avatar_url, u.cover_url, u.bio, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, u.roblox_name, u.roblox_verified, u.created_at FROM conversation_members cm JOIN users u ON u.id = cm.user_id WHERE cm.conversation_id = ? AND cm.membership_status <> 'declined' ORDER BY cm.joined_at`, conversationID)
 	if err != nil {
 		return item, err
 	}
@@ -489,11 +590,12 @@ func getConversation(queryer sqlQueryer, userID, conversationID int64) (domain.C
 	item.Members = make([]domain.PublicUser, 0)
 	for rows.Next() {
 		var member domain.PublicUser
-		var blue, roblox int
-		if err := rows.Scan(&member.ID, &member.DisplayName, &member.AvatarURL, &member.CoverURL, &member.Bio, &blue, &member.VerificationLabel, &member.RobloxName, &roblox, &member.CreatedAt); err != nil {
+		var blue, memberActive, roblox int
+		if err := rows.Scan(&member.ID, &member.DisplayName, &member.AvatarURL, &member.CoverURL, &member.Bio, &blue, &member.VerificationLabel, &memberActive, &member.MembershipTierID, &member.RobloxName, &roblox, &member.CreatedAt); err != nil {
 			return item, err
 		}
 		member.BlueVerified = blue != 0
+		member.MemberActive = memberActive != 0
 		member.RobloxVerified = roblox != 0
 		item.Members = append(item.Members, member)
 	}
@@ -503,12 +605,19 @@ func getConversation(queryer sqlQueryer, userID, conversationID int64) (domain.C
 	if err := rows.Close(); err != nil {
 		return item, err
 	}
+	if err := queryer.QueryRow(`SELECT COALESCE(SUM(membership_status = 'accepted'), 0), COALESCE(SUM(membership_status = 'pending'), 0) FROM conversation_members WHERE conversation_id = ?`, conversationID).Scan(&item.AcceptedMemberCount, &item.PendingInviteCount); err != nil {
+		return item, err
+	}
+	item.Active = (item.Kind == "direct" && item.AcceptedMemberCount == 2) || (item.Kind == "group" && item.AcceptedMemberCount >= 3)
 	var last domain.Message
 	err = queryer.QueryRow(`SELECT m.id, m.conversation_id, m.sender_id, u.display_name, u.avatar_url, m.content, m.created_at FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? AND m.deleted_at IS NULL ORDER BY m.id DESC LIMIT 1`, conversationID).Scan(&last.ID, &last.ConversationID, &last.SenderID, &last.SenderName, &last.SenderAvatar, &last.Content, &last.CreatedAt)
 	if err == nil {
 		item.LastMessage = &last
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return item, err
+	}
+	if !item.Active || item.MembershipStatus != "accepted" {
+		return item, nil
 	}
 	if lastRead.Valid {
 		err = queryer.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND sender_id <> ? AND deleted_at IS NULL AND created_at > ?`, conversationID, userID, lastRead.Time).Scan(&item.UnreadCount)
@@ -519,6 +628,183 @@ func getConversation(queryer sqlQueryer, userID, conversationID int64) (domain.C
 		return item, err
 	}
 	return item, nil
+}
+
+func (s *Store) ListConversationInvites(userID int64) ([]domain.ConversationInvite, error) {
+	rows, err := s.db.Query(`SELECT conversation_id, joined_at FROM conversation_members WHERE user_id = ? AND membership_status = 'pending' ORDER BY joined_at DESC LIMIT 50`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.ConversationInvite, 0)
+	for rows.Next() {
+		var conversationID int64
+		var invitedAt time.Time
+		if err := rows.Scan(&conversationID, &invitedAt); err != nil {
+			return nil, err
+		}
+		conversation, err := getConversationWithMembership(s.db, userID, conversationID, true)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, domain.ConversationInvite{Conversation: conversation, InvitedAt: invitedAt})
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) RemindGroupInvitees(creatorID, conversationID int64) (int64, error) {
+	if creatorID <= 0 || conversationID <= 0 {
+		return 0, ErrGroupInviteReminderNotPermitted
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var kind string
+	var ownerID int64
+	if err := tx.QueryRow(`SELECT kind, created_by FROM conversations WHERE id = ?`, conversationID).Scan(&kind, &ownerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrGroupInviteReminderNotPermitted
+		}
+		return 0, err
+	}
+	if kind != "group" || ownerID != creatorID {
+		return 0, ErrGroupInviteReminderNotPermitted
+	}
+
+	rows, err := tx.Query(`SELECT user_id, last_notified_at FROM conversation_members WHERE conversation_id = ? AND membership_status = 'pending' ORDER BY user_id FOR UPDATE`, conversationID)
+	if err != nil {
+		return 0, err
+	}
+	type pendingInvite struct {
+		userID       int64
+		lastNotified sql.NullTime
+	}
+	pending := make([]pendingInvite, 0)
+	for rows.Next() {
+		var invite pendingInvite
+		if err := rows.Scan(&invite.userID, &invite.lastNotified); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		pending = append(pending, invite)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if err := tx.QueryRow(`SELECT kind, created_by FROM conversations WHERE id = ? FOR UPDATE`, conversationID).Scan(&kind, &ownerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrGroupInviteReminderNotPermitted
+		}
+		return 0, err
+	}
+	if kind != "group" || ownerID != creatorID {
+		return 0, ErrGroupInviteReminderNotPermitted
+	}
+	if err := lockActiveUsers(tx, []int64{creatorID}); err != nil {
+		return 0, err
+	}
+	if len(pending) == 0 {
+		return 0, ErrNoPendingGroupInvites
+	}
+
+	now := time.Now().UTC()
+	for _, invite := range pending {
+		if invite.lastNotified.Valid && now.Before(invite.lastNotified.Time.Add(time.Minute)) {
+			return 0, ErrGroupInviteReminderRateLimited
+		}
+	}
+	for _, invite := range pending {
+		result, err := tx.Exec(`UPDATE conversation_members SET last_notified_at = ? WHERE conversation_id = ? AND user_id = ? AND membership_status = 'pending'`, now, conversationID, invite.userID)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if affected != 1 {
+			return 0, errors.New("群聊邀请状态已变化，请刷新后再试")
+		}
+		if err := createConversationNotification(tx, invite.userID, creatorID, "group_invite_reminder", conversationID, now); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int64(len(pending)), nil
+}
+
+func (s *Store) RespondConversationInvite(userID, conversationID int64, accept bool) (domain.Conversation, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	defer tx.Rollback()
+	var membershipStatus string
+	if err := tx.QueryRow(`SELECT membership_status FROM conversation_members WHERE conversation_id = ? AND user_id = ? FOR UPDATE`, conversationID, userID).Scan(&membershipStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Conversation{}, errors.New("群聊邀请不存在")
+		}
+		return domain.Conversation{}, err
+	}
+	if membershipStatus != "pending" {
+		return domain.Conversation{}, errors.New("该群聊邀请已处理")
+	}
+	var kind string
+	var creatorID int64
+	if err := tx.QueryRow(`SELECT kind, created_by FROM conversations WHERE id = ? FOR UPDATE`, conversationID).Scan(&kind, &creatorID); err != nil {
+		return domain.Conversation{}, err
+	}
+	if kind != "group" {
+		return domain.Conversation{}, errors.New("会话邀请类型无效")
+	}
+	if accept {
+		if err := lockActiveUsers(tx, []int64{userID, creatorID}); err != nil {
+			return domain.Conversation{}, err
+		}
+		blocked, err := blockedEitherWayQuery(tx, userID, creatorID)
+		if err != nil {
+			return domain.Conversation{}, err
+		}
+		if blocked {
+			return domain.Conversation{}, errors.New("无法加入存在拉黑关系的群聊")
+		}
+	}
+	now := time.Now().UTC()
+	status := "declined"
+	var lastReadAt any
+	if accept {
+		status = "accepted"
+		lastReadAt = now
+	}
+	if _, err := tx.Exec(`UPDATE conversation_members SET membership_status = ?, last_read_at = ?, responded_at = ? WHERE conversation_id = ? AND user_id = ? AND membership_status = 'pending'`, status, lastReadAt, now, conversationID, userID); err != nil {
+		return domain.Conversation{}, err
+	}
+	if _, err := tx.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now, conversationID); err != nil {
+		return domain.Conversation{}, err
+	}
+	if !accept {
+		if err := tx.Commit(); err != nil {
+			return domain.Conversation{}, err
+		}
+		return domain.Conversation{ID: conversationID, MembershipStatus: status}, nil
+	}
+	conversation, err := getConversation(tx, userID, conversationID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Conversation{}, err
+	}
+	return conversation, nil
 }
 
 func (s *Store) ListMessages(userID, conversationID int64, limit int) ([]domain.Message, error) {
@@ -585,6 +871,9 @@ func (s *Store) SendMessage(userID, conversationID int64, content string) (domai
 	kind, members, err := readConversationMembers(tx, userID, conversationID)
 	if err != nil {
 		return domain.Message{}, err
+	}
+	if kind == "group" && len(members) < 3 {
+		return domain.Message{}, errors.New("群聊仍在等待成员接受邀请")
 	}
 	if kind == "direct" {
 		if err := lockActiveUsers(tx, members); err != nil {
@@ -667,7 +956,7 @@ func readConversationMembers(queryer sqlQueryer, userID, conversationID int64) (
 		}
 		return "", nil, err
 	}
-	rows, err := queryer.Query(`SELECT user_id FROM conversation_members WHERE conversation_id = ? ORDER BY user_id`, conversationID)
+	rows, err := queryer.Query(`SELECT user_id, membership_status FROM conversation_members WHERE conversation_id = ? ORDER BY user_id`, conversationID)
 	if err != nil {
 		return "", nil, err
 	}
@@ -676,11 +965,14 @@ func readConversationMembers(queryer sqlQueryer, userID, conversationID int64) (
 	allowed := false
 	for rows.Next() {
 		var memberID int64
-		if err := rows.Scan(&memberID); err != nil {
+		var membershipStatus string
+		if err := rows.Scan(&memberID, &membershipStatus); err != nil {
 			return "", nil, err
 		}
-		members = append(members, memberID)
-		allowed = allowed || memberID == userID
+		if membershipStatus == "accepted" {
+			members = append(members, memberID)
+			allowed = allowed || memberID == userID
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return "", nil, err

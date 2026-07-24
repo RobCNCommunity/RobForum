@@ -2,6 +2,26 @@
 
 独立的 Roblox 中文玩家社区，后端使用 Go + Chi + MariaDB/MySQL，前端使用 Vue 3 + TypeScript + NutUI。
 
+## 目录与构建
+
+- `frontend/`：唯一的 Vue 3 + Vite + NutUI 前端源码和构建产物来源。
+- `cmd/`、`internal/`：Go 后端服务源码。
+- `migrations/`：MySQL/MariaDB 数据库迁移。
+- `web/`：空的历史目录，不是当前前端；可以忽略。
+
+前端不使用 Python 构建。开发和生产构建均由 Vite 的 npm 脚本完成：
+
+```bash
+# 在项目根目录
+npm run build
+
+# 或在前端目录直接使用 Vite 脚本
+cd frontend
+npm run build
+```
+
+带类型检查的生产检查可使用 `npm run build:checked`。部署只上传 `frontend/dist/`，不要运行任何 Python 页面生成脚本。
+
 ## 当前已实现
 
 - MySQL/MariaDB 生产存储和嵌入式迁移
@@ -80,3 +100,28 @@ pnpm dev
 生产环境使用 `/opt/roblox-community/bin/roblox-community` 和 `/opt/roblox-community/frontend/dist`，将 `deploy/roblox-community.service` 安装到 systemd 后，通过 Nginx 反向代理到 `127.0.0.1:8088`。
 
 `ROBLOX_MASTER_KEY` 不能更换，否则已加密的 SMTP 和验证码密钥无法解密。上线前必须设置唯一的管理员密码、数据库密码和公网地址。
+
+内容审核在服务器环境变量中配置，密钥不可写入前端或仓库：
+
+```bash
+ROBLOX_CONTENT_MODERATION_ENABLED=true
+ROBLOX_CONTENT_MODERATION_URL='https://provider.example'
+ROBLOX_CONTENT_MODERATION_API_KEY='server-only-secret'
+ROBLOX_CONTENT_MODERATION_MODEL='grok-4.5'
+ROBLOX_CONTENT_MODERATION_TIMEOUT_SECONDS=30
+
+# 可选：百度文本审核第二层。启用后必须同时配置真正的 API Key（AK）和
+# Secret Key（SK）；AppID 不能替代 API Key。百度和上游审核均通过后才会放行。
+ROBLOX_BAIDU_CONTENT_MODERATION_ENABLED=false
+ROBLOX_BAIDU_CONTENT_MODERATION_API_KEY='baidu-api-key'
+ROBLOX_BAIDU_CONTENT_MODERATION_SECRET_KEY='baidu-secret-key'
+ROBLOX_BAIDU_CONTENT_MODERATION_APP_ID='optional-app-id'
+ROBLOX_BAIDU_CONTENT_MODERATION_AUTH_URL='https://aip.baidubce.com/oauth/2.0/token'
+ROBLOX_BAIDU_CONTENT_MODERATION_URL='https://aip.baidubce.com/rest/2.0/solution/v1/text_censor/v2/user_defined'
+ROBLOX_BAIDU_CONTENT_MODERATION_STRATEGY_ID='optional-strategy-id'
+ROBLOX_BAIDU_IMAGE_MODERATION_ENABLED=true
+ROBLOX_BAIDU_IMAGE_MODERATION_URL='https://aip.baidubce.com/rest/2.0/solution/v1/img_censor/v2/user_defined'
+ROBLOX_BAIDU_IMAGE_MODERATION_STRATEGY_ID='optional-image-strategy-id'
+```
+
+启用后，帖子标题/正文、评论、资料、认证申请、群名和私信/群聊消息均在写入数据库前进行文本审核；帖子图片、评论图片、头像、封面、资源预览图以及图片类型的资源文件会进行百度图像审核。资源标题和介绍仍进入人工审核队列。未显式设置 `ROBLOX_BAIDU_IMAGE_MODERATION_ENABLED` 时，图片审核开关继承百度文本审核开关。启用多个文本审核服务时，所有服务都必须通过；任一服务异常、输出格式错误或审计记录失败时会拒绝提交。百度返回“不合规”和“疑似”都会拦截，审核失败按不可用处理；审计表只保存内容或图片的 SHA-256、审核结果和时间，不保存原文或图片。百度凭据只能放在服务器环境变量中，不能写入前端或仓库。

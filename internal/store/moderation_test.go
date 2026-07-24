@@ -53,16 +53,19 @@ func TestInitialPostStatus(t *testing.T) {
 	tests := []struct {
 		reviewRequired bool
 		role           string
+		memberExempt   bool
 		want           string
 	}{
-		{true, "user", "pending"},
-		{true, "creator", "pending"},
-		{true, "admin", "published"},
-		{false, "user", "published"},
+		{true, "user", false, "pending"},
+		{true, "creator", false, "pending"},
+		{true, "admin", false, "published"},
+		{true, "user", true, "published"},
+		{true, "creator", true, "published"},
+		{false, "user", false, "published"},
 	}
 	for _, test := range tests {
-		if got := initialPostStatus(test.reviewRequired, test.role); got != test.want {
-			t.Errorf("initialPostStatus(%v, %q) = %q, want %q", test.reviewRequired, test.role, got, test.want)
+		if got := initialPostStatus(test.reviewRequired, test.role, test.memberExempt); got != test.want {
+			t.Errorf("initialPostStatus(%v, %q, %v) = %q, want %q", test.reviewRequired, test.role, test.memberExempt, got, test.want)
 		}
 	}
 }
@@ -72,5 +75,35 @@ func TestModerationErrorKind(t *testing.T) {
 	typed, ok := err.(*ModerationError)
 	if !ok || typed.Kind != ModerationErrorForbidden || typed.Error() != "受保护账号" {
 		t.Fatalf("unexpected moderation error: %#v", err)
+	}
+}
+
+func TestNormalizeContentReportReason(t *testing.T) {
+	if got, err := normalizeContentReportReason("  冒充官方账号  "); err != nil || got != "冒充官方账号" {
+		t.Fatalf("normalize report reason = %q, %v", got, err)
+	}
+	for _, reason := range []string{"", "a", "违规\x00内容", "删除符\x7f"} {
+		if _, err := normalizeContentReportReason(reason); err == nil {
+			t.Fatalf("report reason %q was accepted", reason)
+		}
+	}
+}
+
+func TestContentReportValidation(t *testing.T) {
+	for _, targetType := range []string{contentReportTargetPost, contentReportTargetComment, contentReportTargetProfile} {
+		if !validContentReportTargetType(targetType) {
+			t.Errorf("target type %q rejected", targetType)
+		}
+	}
+	if validContentReportTargetType("resource") {
+		t.Fatal("unsupported report target type accepted")
+	}
+	for _, status := range []string{"", "pending", "accepted", "rejected"} {
+		if !validContentReportStatusFilter(status) {
+			t.Errorf("report status %q rejected", status)
+		}
+	}
+	if validContentReportStatusFilter("hidden") {
+		t.Fatal("unsupported report status accepted")
 	}
 }

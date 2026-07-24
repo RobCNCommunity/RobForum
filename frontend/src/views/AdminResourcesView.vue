@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { Notify } from '@nutui/nutui'
-import { errorMessage, fetchAdminResources, reviewResource, type Resource } from '@/api'
+import { adminResourceDownloadURL, errorMessage, fetchAdminResources, reviewResource, type Resource } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
 
@@ -62,7 +62,7 @@ onMounted(load)
         <header><div><span class="rf-kicker">#{{ item.id }}</span><strong>{{ item.title }}</strong></div><time>{{ new Date(item.created_at).toLocaleString('zh-CN') }}</time></header>
         <p>{{ item.description || '投稿者未填写资源说明。' }}</p>
         <dl><div><dt>投稿者</dt><dd>{{ item.creator_name }}</dd></div><div><dt>游戏与版本</dt><dd>{{ item.game }} {{ item.version }}</dd></div><div><dt>资源类型</dt><dd>{{ item.resource_type }}</dd></div><div><dt>文件</dt><dd>{{ item.file?.original_name || '未提供' }} · {{ fileSize(item.file?.size_bytes) }}</dd></div></dl>
-        <footer><div class="rf-file-hash" v-if="item.file?.sha256"><span>SHA-256</span><code>{{ item.file.sha256 }}</code></div><div class="rf-row-actions"><nut-button size="small" type="primary" :loading="actionID === item.id" @click="applyReview(item, 'approved')">通过</nut-button><button type="button" class="rf-danger-button rf-button-small" :disabled="actionID === item.id" @click="reject(item)">拒绝</button><button type="button" class="rf-secondary-button rf-button-small" :disabled="actionID === item.id" @click="takedown(item)">下架</button></div></footer>
+        <footer><div class="rf-file-hash" v-if="item.file?.sha256"><span>SHA-256</span><code>{{ item.file.sha256 }}</code></div><div class="rf-row-actions"><a class="rf-secondary-button rf-button-small" :href="adminResourceDownloadURL(item.id)" download>下载文件</a><nut-button size="small" type="primary" :loading="actionID === item.id" @click="applyReview(item, 'approved')">通过</nut-button><button type="button" class="rf-danger-button rf-button-small" :disabled="actionID === item.id" @click="reject(item)">拒绝</button><button type="button" class="rf-secondary-button rf-button-small" :disabled="actionID === item.id" @click="takedown(item)">下架</button></div></footer>
       </article>
     </section>
   </PageContainer>

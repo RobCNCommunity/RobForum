@@ -32,6 +32,12 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 	defer r.MultipartForm.RemoveAll()
 
 	boardID, _ := strconv.ParseInt(strings.TrimSpace(r.FormValue("board_id")), 10, 64)
+	title := r.FormValue("title")
+	content := r.FormValue("content")
+	postType := r.FormValue("post_type")
+	if !s.approveContent(w, r, "post", moderationText("标题："+title, "正文："+content)) {
+		return
+	}
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
 		files = r.MultipartForm.File["file"]
@@ -40,7 +46,6 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "post_media_too_many", "每篇帖子最多上传 4 张图片")
 		return
 	}
-
 	media := make([]store.PostMediaInput, 0, len(files))
 	savedPaths := make([]string, 0, len(files))
 	cleanup := func() {
@@ -55,11 +60,15 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "post_media_invalid", err.Error())
 			return
 		}
-		media = append(media, item)
 		savedPaths = append(savedPaths, path)
+		if !s.approveImagePath(w, r, "post", path) {
+			cleanup()
+			return
+		}
+		media = append(media, item)
 	}
 
-	item, err := s.store.CreatePostWithMedia(currentUser(r).ID, boardID, r.FormValue("title"), r.FormValue("content"), r.FormValue("post_type"), media)
+	item, err := s.store.CreatePostWithMedia(currentUser(r).ID, boardID, title, content, postType, media)
 	if err != nil {
 		cleanup()
 		writeError(w, http.StatusBadRequest, "post_failed", err.Error())
@@ -95,8 +104,8 @@ func (s *Server) savePostMedia(header *multipart.FileHeader) (store.PostMediaInp
 		return store.PostMediaInput{}, "", errors.New("图片无法重新读取")
 	}
 	config, _, err := image.DecodeConfig(io.LimitReader(file, maxPostMediaUpload+1))
-	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 8192 || config.Height > 8192 {
-		return store.PostMediaInput{}, "", errors.New("图片尺寸无效或超过 8192 × 8192")
+	if err != nil || config.Width < 16 || config.Height < 16 || config.Width > 6000 || config.Height > 6000 {
+		return store.PostMediaInput{}, "", errors.New("图片尺寸必须在 16 × 16 至 6000 × 6000 之间")
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return store.PostMediaInput{}, "", errors.New("图片无法重新读取")

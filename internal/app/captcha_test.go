@@ -56,3 +56,12 @@ func TestValidateGT4RejectsInvalidInput(t *testing.T) {
 		t.Fatalf("mismatched captcha ID accepted: %v", err)
 	}
 }
+
+func TestRegistrationCaptchaRequirement(t *testing.T) {
+	if !registrationCaptchaRequired(domain.SiteSettings{RequireEmailVerification: false}) {
+		t.Fatal("registration without email verification must require CAPTCHA")
+	}
+	if registrationCaptchaRequired(domain.SiteSettings{RequireEmailVerification: true}) {
+		t.Fatal("email-code registration must not require a second CAPTCHA")
+	}
+}

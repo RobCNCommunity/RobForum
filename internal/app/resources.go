@@ -32,9 +32,13 @@ var blockedArchiveExtensions = map[string]struct{}{
 	".sh": {}, ".tar": {}, ".vbs": {}, ".xz": {}, ".zip": {},
 }
 
-func (s *Server) listPublicResources(w http.ResponseWriter, _ *http.Request) {
-	items, err := s.store.ListResources("approved", 0, 50)
+func (s *Server) listPublicResources(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.SearchPublicResources(r.URL.Query().Get("q"), 50)
 	if err != nil {
+		if strings.TrimSpace(r.URL.Query().Get("q")) != "" {
+			writeError(w, http.StatusBadRequest, "search_invalid", "搜索关键词无效")
+			return
+		}
 		writeError(w, 500, "resources_failed", "资源列表加载失败")
 		return
 	}
@@ -74,7 +78,7 @@ func (s *Server) listAdminResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createResource(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxResourceUpload+(2<<20))
+	r.Body = http.MaxBytesReader(w, r.Body, maxResourceUpload+maxResourcePreviewCount*maxResourcePreviewUpload+(4<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		writeError(w, 400, "upload_invalid", "上传内容过大或格式无效")
 		return
@@ -86,6 +90,11 @@ func (s *Server) createResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	previewHeaders := r.MultipartForm.File["preview_files"]
+	if len(previewHeaders) > maxResourcePreviewCount {
+		writeError(w, http.StatusBadRequest, "preview_too_many", "最多上传 5 张预览图")
+		return
+	}
 
 	originalName := filepath.Base(strings.TrimSpace(header.Filename))
 	extension := strings.ToLower(filepath.Ext(originalName))
@@ -146,25 +155,56 @@ func (s *Server) createResource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if strings.HasPrefix(mimeType, "image/") && !s.approveImagePath(w, r, "resource", targetPath) {
+		_ = os.Remove(targetPath)
+		return
+	}
+	previewInputs := make([]store.ResourceMediaInput, 0, len(previewHeaders))
+	previewPaths := make([]string, 0, len(previewHeaders))
+	cleanup := func() {
+		_ = os.Remove(targetPath)
+		for _, path := range previewPaths {
+			_ = os.Remove(path)
+		}
+	}
+	for _, previewHeader := range previewHeaders {
+		if previewHeader == nil || previewHeader.Size < 1 || previewHeader.Size > maxResourcePreviewUpload {
+			cleanup()
+			writeError(w, http.StatusBadRequest, "preview_invalid", "预览图为空或超过 5 MB")
+			return
+		}
+		preview, path, previewErr := s.saveResourcePreview(previewHeader)
+		if previewErr != nil {
+			cleanup()
+			writeError(w, http.StatusBadRequest, "preview_invalid", previewErr.Error())
+			return
+		}
+		previewPaths = append(previewPaths, path)
+		if !s.approveImagePath(w, r, "resource", path) {
+			cleanup()
+			return
+		}
+		previewInputs = append(previewInputs, preview)
+	}
 
 	priceCents := int64(0)
 	if rawPrice := strings.TrimSpace(r.FormValue("price_cents")); rawPrice != "" {
 		priceCents, err = strconv.ParseInt(rawPrice, 10, 64)
 		if err != nil || priceCents < 0 {
-			_ = os.Remove(targetPath)
+			cleanup()
 			writeError(w, 400, "price_invalid", "资源价格无效")
 			return
 		}
 	}
-	item, err := s.store.CreateResource(currentUser(r).ID, r.FormValue("title"), r.FormValue("description"), r.FormValue("game"), r.FormValue("version"), r.FormValue("resource_type"), priceCents, store.ResourceFileInput{
+	item, err := s.store.CreateResourceWithMedia(currentUser(r).ID, r.FormValue("title"), r.FormValue("description"), r.FormValue("game"), r.FormValue("version"), r.FormValue("resource_type"), priceCents, store.ResourceFileInput{
 		OriginalName: originalName,
 		StoredName:   storedName,
 		MIMEType:     mimeType,
 		SizeBytes:    written,
 		SHA256:       hex.EncodeToString(hash.Sum(nil)),
-	})
+	}, previewInputs)
 	if err != nil {
-		_ = os.Remove(targetPath)
+		cleanup()
 		writeError(w, 400, "resource_create_failed", err.Error())
 		return
 	}
@@ -233,6 +273,30 @@ func (s *Server) downloadResource(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.IncrementResourceDownload(resourceID); err != nil {
 		s.logger.Error("failed to increment resource download count", "resource_id", resourceID, "error", err)
 	}
+	http.ServeFile(w, r, path)
+}
+
+func (s *Server) downloadResourceForAdmin(w http.ResponseWriter, r *http.Request) {
+	resourceID, _ := strconv.ParseInt(chi.URLParam(r, "resourceID"), 10, 64)
+	item, storedName, err := s.store.ResourceDownloadForAdmin(resourceID)
+	if err != nil || item.File == nil || storedName == "" || filepath.Base(storedName) != storedName {
+		writeError(w, http.StatusNotFound, "resource_not_found", "资源文件不存在")
+		return
+	}
+	path := filepath.Join(s.uploadDir, storedName)
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != item.File.SizeBytes {
+		writeError(w, http.StatusGone, "resource_file_missing", "资源文件不存在或校验异常")
+		return
+	}
+	if err := verifyFileSHA256(path, item.File.SHA256); err != nil {
+		writeError(w, http.StatusGone, "resource_file_corrupted", "资源文件完整性校验失败")
+		return
+	}
+	w.Header().Set("Content-Type", item.File.MIMEType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": item.File.OriginalName}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeFile(w, r, path)
 }
 

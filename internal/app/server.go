@@ -28,6 +28,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"roblox-community/internal/auth"
+	"roblox-community/internal/contentmoderation"
 	"roblox-community/internal/domain"
 	"roblox-community/internal/store"
 )
@@ -39,6 +40,7 @@ type Server struct {
 	publicURL string
 	logger    *slog.Logger
 	limiter   *requestLimiter
+	moderator contentmoderation.Service
 }
 
 type contextKey string
@@ -46,7 +48,11 @@ type contextKey string
 const userKey contextKey = "user"
 
 func New(data *store.Store, staticDir, uploadDir, publicURL string, logger *slog.Logger) *Server {
-	return &Server{store: data, staticDir: staticDir, uploadDir: uploadDir, publicURL: strings.TrimRight(publicURL, "/"), logger: logger, limiter: newRequestLimiter()}
+	return NewWithModeration(data, staticDir, uploadDir, publicURL, logger, nil)
+}
+
+func NewWithModeration(data *store.Store, staticDir, uploadDir, publicURL string, logger *slog.Logger, moderator contentmoderation.Service) *Server {
+	return &Server{store: data, staticDir: staticDir, uploadDir: uploadDir, publicURL: strings.TrimRight(publicURL, "/"), logger: logger, limiter: newRequestLimiter(), moderator: moderator}
 }
 
 func (s *Server) Router() http.Handler {
@@ -55,6 +61,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(s.securityHeaders, s.cors, s.rateLimit, s.csrfProtection)
 	r.Get("/api/v1/health", s.health)
 	r.Get("/api/v1/site/settings", s.publicSiteSettings)
+	r.Get("/api/v1/membership/config", s.publicMembershipConfig)
 	r.Get("/api/v1/captcha/config", s.publicCaptchaConfig)
 	r.Get("/api/v1/oauth/config", s.publicOAuthConfig)
 	r.Get("/api/v1/oauth/start", s.oauthStart)
@@ -62,10 +69,13 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/v1/users/search", s.searchUsers)
 	r.Get("/api/v1/users/hot", s.hotUsers)
 	r.Get("/api/v1/users/{userID}", s.getUserProfile)
+	r.Get("/api/v1/search", s.searchCommunity)
 	r.Get("/api/v1/media/avatars/{filename}", s.serveAvatar)
 	r.Get("/api/v1/media/covers/{filename}", s.serveCover)
 	r.Get("/api/v1/media/site-assets/{filename}", s.serveSiteAsset)
 	r.Get("/api/v1/media/posts/{filename}", s.servePostMedia)
+	r.Get("/api/v1/media/resources/{filename}", s.serveResourceMedia)
+	r.Get("/api/v1/media/comments/{filename}", s.serveCommentMedia)
 	r.Post("/api/v1/auth/register", s.register)
 	r.Post("/api/v1/auth/register/verification", s.sendRegisterVerification)
 	r.Post("/api/v1/auth/login", s.login)
@@ -93,7 +103,9 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/v1/me/verification-applications", s.createVerificationApplication)
 		r.Post("/api/v1/posts", s.createPost)
 		r.Post("/api/v1/posts/{postID}/comments", s.createComment)
+		r.Post("/api/v1/posts/{postID}/report", s.createPostReport)
 		r.Delete("/api/v1/comments/{commentID}", s.deleteComment)
+		r.Post("/api/v1/comments/{commentID}/report", s.createCommentReport)
 		r.Get("/api/v1/posts/{postID}/like", s.postLikeStatus)
 		r.Post("/api/v1/posts/{postID}/like", s.togglePostLike)
 		r.Get("/api/v1/comments/{commentID}/like", s.commentLikeStatus)
@@ -101,6 +113,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/v1/users/{userID}/block", s.userBlockStatus)
 		r.Post("/api/v1/users/{userID}/block", s.toggleUserBlock)
 		r.Delete("/api/v1/users/{userID}/block", s.toggleUserBlock)
+		r.Post("/api/v1/users/{userID}/report", s.createProfileReport)
 		r.Get("/api/v1/users/{userID}/follow", s.followStatus)
 		r.Post("/api/v1/users/{userID}/follow", s.followUser)
 		r.Delete("/api/v1/users/{userID}/follow", s.unfollowUser)
@@ -114,7 +127,19 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/v1/me/notifications/unread-count", s.unreadNotifications)
 		r.Post("/api/v1/me/notifications/read", s.markNotificationsRead)
 		r.Get("/api/v1/me/conversations", s.listConversations)
+		r.Get("/api/v1/me/conversation-invites", s.listConversationInvites)
 		r.Post("/api/v1/conversations", s.createConversation)
+		r.Post("/api/v1/conversation-invites/{conversationID}/respond", s.respondConversationInvite)
+		r.Post("/api/v1/conversation-invite-links/join", s.joinConversationByInvite)
+		r.Get("/api/v1/conversations/{conversationID}/members", s.listConversationMembers)
+		r.Post("/api/v1/conversations/{conversationID}/members", s.inviteConversationMembers)
+		r.Delete("/api/v1/conversations/{conversationID}/members/{userID}", s.removeConversationMember)
+		r.Patch("/api/v1/conversations/{conversationID}", s.updateConversation)
+		r.Delete("/api/v1/conversations/{conversationID}", s.deleteConversation)
+		r.Post("/api/v1/conversations/{conversationID}/leave", s.leaveConversation)
+		r.Post("/api/v1/conversations/{conversationID}/invite-link", s.createConversationInviteLink)
+		r.Delete("/api/v1/conversations/{conversationID}/invite-link", s.revokeConversationInviteLink)
+		r.Post("/api/v1/conversations/{conversationID}/remind", s.remindGroupInvitees)
 		r.Get("/api/v1/conversations/{conversationID}/messages", s.listMessages)
 		r.Post("/api/v1/conversations/{conversationID}/messages", s.createMessage)
 		r.Post("/api/v1/resources", s.createResource)
@@ -122,6 +147,11 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/v1/resources/{resourceID}/orders", s.createResourceOrder)
 		r.Get("/api/v1/me/orders", s.listMyOrders)
 		r.Get("/api/v1/me/wallet", s.myWallet)
+		r.Get("/api/v1/me/membership", s.myMembership)
+		r.Post("/api/v1/me/membership/subscribe", s.subscribeMembership)
+		r.Post("/api/v1/me/wallet/top-ups", s.createWalletTopUp)
+		r.Post("/api/v1/me/wallet/redeem", s.redeemWalletCode)
+		r.Post("/api/v1/resources/{resourceID}/wallet-order", s.createWalletResourceOrder)
 		r.Get("/api/v1/me/creator/balance", s.creatorBalance)
 		r.Post("/api/v1/me/creator/payouts", s.requestCreatorPayout)
 		r.Get("/api/v1/me/creator/payouts", s.listCreatorPayouts)
@@ -134,6 +164,15 @@ func (s *Server) Router() http.Handler {
 		r.Put("/api/v1/admin/site", s.updateSiteSettings)
 		r.Post("/api/v1/admin/site/verification-badge", s.uploadVerificationBadge)
 		r.Delete("/api/v1/admin/site/verification-badge", s.deleteVerificationBadge)
+		r.Get("/api/v1/admin/membership", s.adminMembership)
+		r.Put("/api/v1/admin/membership", s.updateAdminMembership)
+		r.Post("/api/v1/admin/membership/tiers", s.createMembershipTier)
+		r.Put("/api/v1/admin/membership/tiers/{tierID}", s.updateMembershipTier)
+		r.Delete("/api/v1/admin/membership/tiers/{tierID}", s.deleteMembershipTier)
+		r.Post("/api/v1/admin/membership/tiers/{tierID}/badge", s.uploadMembershipTierBadge)
+		r.Delete("/api/v1/admin/membership/tiers/{tierID}/badge", s.deleteMembershipTierBadge)
+		r.Post("/api/v1/admin/membership/badge", s.uploadMembershipBadge)
+		r.Delete("/api/v1/admin/membership/badge", s.deleteMembershipBadge)
 		r.Get("/api/v1/admin/smtp", s.adminSMTP)
 		r.Put("/api/v1/admin/smtp", s.updateSMTP)
 		r.Post("/api/v1/admin/smtp/test", s.testSMTP)
@@ -143,8 +182,12 @@ func (s *Server) Router() http.Handler {
 		r.Put("/api/v1/admin/oauth", s.updateOAuthConfig)
 		r.Get("/api/v1/admin/resources", s.listAdminResources)
 		r.Patch("/api/v1/admin/resources/{resourceID}", s.reviewResource)
+		r.Get("/api/v1/admin/resources/{resourceID}/download", s.downloadResourceForAdmin)
 		r.Get("/api/v1/admin/payment", s.adminPayment)
 		r.Put("/api/v1/admin/payment", s.updatePayment)
+		r.Get("/api/v1/admin/wallet/redeem-codes", s.listAdminRedeemCodes)
+		r.Post("/api/v1/admin/wallet/redeem-codes", s.createAdminRedeemCode)
+		r.Post("/api/v1/admin/wallet/redeem-codes/{codeID}/revoke", s.revokeAdminRedeemCode)
 		r.Get("/api/v1/admin/payouts", s.listAdminPayouts)
 		r.Patch("/api/v1/admin/payouts/{payoutID}", s.reviewAdminPayout)
 		r.Get("/api/v1/admin/verifications", s.listAdminVerificationApplications)
@@ -154,6 +197,8 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/api/v1/admin/users/{userID}", s.deleteAdminUser)
 		r.Get("/api/v1/admin/posts", s.listAdminPosts)
 		r.Patch("/api/v1/admin/posts/{postID}/moderate", s.moderateAdminPost)
+		r.Get("/api/v1/admin/reports", s.listAdminContentReports)
+		r.Patch("/api/v1/admin/reports/{reportID}", s.reviewAdminContentReport)
 		r.Get("/api/v1/admin/ads", s.listAdminAds)
 		r.Post("/api/v1/admin/ads", s.createAdminAd)
 		r.Put("/api/v1/admin/ads/{adID}", s.updateAdminAd)
@@ -287,9 +332,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_email", err.Error())
 		return
 	}
-	if err := s.verifyCaptcha(r, input.CaptchaToken); err != nil {
-		writeError(w, 400, "captcha_required", err.Error())
-		return
+	// When email verification is enabled, the one-time code was issued only
+	// after a successful CAPTCHA challenge. Requiring another challenge here
+	// would consume a second GT4 token without adding a new trust boundary.
+	if registrationCaptchaRequired(settings) {
+		if err := s.verifyCaptcha(r, input.CaptchaToken); err != nil {
+			writeError(w, 400, "captcha_required", err.Error())
+			return
+		}
 	}
 	user, token, err := s.store.RegisterUser(input.Email, input.Password, input.DisplayName, input.EmailCode, settings.RequireEmailVerification)
 	if err != nil {
@@ -298,6 +348,10 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setSessionCookie(w, r, token)
 	writeJSON(w, 201, map[string]any{"user": user})
+}
+
+func registrationCaptchaRequired(settings domain.SiteSettings) bool {
+	return !settings.RequireEmailVerification
 }
 
 func (s *Server) sendRegisterVerification(w http.ResponseWriter, r *http.Request) {
@@ -457,11 +511,69 @@ func (s *Server) listBoards(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, result)
 }
 
+func recommendedPostsRequested(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("feed")), "for-you")
+}
+
+func requestedPostBoard(r *http.Request) string {
+	if recommendedPostsRequested(r) {
+		return ""
+	}
+	board := strings.TrimSpace(r.URL.Query().Get("board"))
+	if strings.EqualFold(board, "all") {
+		return ""
+	}
+	return board
+}
+
 func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
-	result, err := s.store.ListPosts(r.URL.Query().Get("board"), r.URL.Query().Get("q"), 30)
+	board := requestedPostBoard(r)
+	if r.URL.Query().Get("paged") == "1" {
+		limit, offset := paginationParams(r, 30, 50)
+		var (
+			result domain.PostPage
+			err    error
+		)
+		if recommendedPostsRequested(r) {
+			result, err = s.store.ListRecommendedPostsPage(limit, offset)
+		} else {
+			result, err = s.store.ListPostsPage(board, r.URL.Query().Get("q"), limit, offset)
+		}
+		if err != nil {
+			writeError(w, 500, "posts_failed", "帖子加载失败")
+			return
+		}
+		if viewer, _, sessionErr := s.userBySessionCookies(r); sessionErr == nil {
+			if err := s.store.MarkPostsLikedBy(viewer.ID, result.Items); err != nil {
+				s.logger.Error("load post like state failed", "user_id", viewer.ID, "error", err)
+				writeError(w, 500, "posts_failed", "帖子加载失败")
+				return
+			}
+		}
+		writeJSON(w, 200, result)
+		return
+	}
+	var (
+		result []domain.Post
+		err    error
+	)
+	if recommendedPostsRequested(r) {
+		result, err = s.store.ListRecommendedPosts(30)
+	} else {
+		result, err = s.store.ListPosts(board, r.URL.Query().Get("q"), 30)
+	}
 	if err != nil {
 		writeError(w, 500, "posts_failed", "帖子加载失败")
 		return
+	}
+	// This endpoint is public, but a valid session lets the timeline expose
+	// viewer-specific interaction state without making anonymous access fail.
+	if viewer, _, sessionErr := s.userBySessionCookies(r); sessionErr == nil {
+		if err := s.store.MarkPostsLikedBy(viewer.ID, result); err != nil {
+			s.logger.Error("load post like state failed", "user_id", viewer.ID, "error", err)
+			writeError(w, 500, "posts_failed", "帖子加载失败")
+			return
+		}
 	}
 	writeJSON(w, 200, result)
 }
@@ -490,6 +602,9 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	if !s.approveContent(w, r, "post", moderationText("标题："+input.Title, "正文："+input.Content)) {
+		return
+	}
 	item, err := s.store.CreatePost(currentUser(r).ID, input.BoardID, input.Title, input.Content, input.PostType)
 	if err != nil {
 		writeError(w, 400, "post_failed", err.Error())
@@ -509,14 +624,80 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createComment(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "postID"), 10, 64)
+	user := currentUser(r)
+	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, maxCommentMediaCount*maxCommentMediaUpload+(1<<20))
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			writeError(w, http.StatusBadRequest, "comment_upload_invalid", "评论图片过大或表单格式无效")
+			return
+		}
+		defer r.MultipartForm.RemoveAll()
+		content := strings.TrimSpace(r.FormValue("content"))
+		files := r.MultipartForm.File["files"]
+		if len(files) == 0 {
+			files = r.MultipartForm.File["file"]
+		}
+		if len(files) > maxCommentMediaCount {
+			writeError(w, http.StatusBadRequest, "comment_media_too_many", "每条评论最多上传 4 张图片")
+			return
+		}
+		if content == "" && len(files) == 0 {
+			writeError(w, http.StatusBadRequest, "comment_invalid", "评论内容或图片不能为空")
+			return
+		}
+		if content != "" && !s.approveContent(w, r, "comment", content) {
+			return
+		}
+		media := make([]store.CommentMediaInput, 0, len(files))
+		savedPaths := make([]string, 0, len(files))
+		cleanup := func() {
+			for _, path := range savedPaths {
+				_ = os.Remove(path)
+			}
+		}
+		for _, header := range files {
+			item, path, saveErr := s.saveCommentMedia(header)
+			if saveErr != nil {
+				cleanup()
+				writeError(w, http.StatusBadRequest, "comment_media_invalid", saveErr.Error())
+				return
+			}
+			savedPaths = append(savedPaths, path)
+			if !s.approveImagePath(w, r, "comment", path) {
+				cleanup()
+				return
+			}
+			media = append(media, item)
+		}
+		item, err := s.store.CreateCommentWithMedia(user.ID, id, content, media)
+		if err != nil {
+			cleanup()
+			switch {
+			case errors.Is(err, store.ErrCommentInvalid):
+				writeError(w, http.StatusBadRequest, "comment_invalid", "评论内容或图片无效")
+			case errors.Is(err, store.ErrCommentAuthorUnavailable):
+				writeError(w, http.StatusForbidden, "comment_author_unavailable", "当前账号无法发表评论")
+			case errors.Is(err, store.ErrPostUnavailable):
+				writeError(w, http.StatusNotFound, "post_unavailable", "帖子不存在或已停止评论")
+			default:
+				s.logger.Error("create comment with media failed", "request_id", middleware.GetReqID(r.Context()), "user_id", user.ID, "post_id", id, "error", err)
+				writeError(w, http.StatusInternalServerError, "comment_failed", "评论发布失败，请稍后重试")
+			}
+			return
+		}
+		writeJSON(w, http.StatusCreated, item)
+		return
+	}
 	var input struct {
 		Content string `json:"content"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	id, _ := strconv.ParseInt(chi.URLParam(r, "postID"), 10, 64)
-	user := currentUser(r)
+	if !s.approveContent(w, r, "comment", input.Content) {
+		return
+	}
 	item, err := s.store.CreateComment(user.ID, id, input.Content)
 	if err != nil {
 		switch {

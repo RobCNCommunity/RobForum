@@ -8,6 +8,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
+import MembershipBadge from '@/components/MembershipBadge.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -44,9 +45,9 @@ function chooseImage(
     input.value = ''
     return
   }
-  const maxSize = kind === 'avatar' ? 5 * 1024 * 1024 : 8 * 1024 * 1024
+	const maxSize = kind === 'avatar' ? 5 * 1024 * 1024 : 7 * 1024 * 1024
   if (file.size > maxSize) {
-    Notify.warn(`${kind === 'avatar' ? '头像不能超过 5 MB' : '封面不能超过 8 MB'}`)
+		Notify.warn(`${kind === 'avatar' ? '头像不能超过 5 MB' : '封面不能超过 7 MB'}`)
     input.value = ''
     return
   }
@@ -159,7 +160,7 @@ onBeforeUnmount(() => {
       <button type="button" class="rf-x-verification-row" @click="router.push('/verification/apply')">
         <span>
           <strong>{{ auth.user?.blue_verified ? (auth.user.verification_label || '已认证') : '认证' }}</strong>
-          <VerifiedBadge :verified="auth.user?.blue_verified" :label="auth.user?.verification_label" />
+          <VerifiedBadge :verified="auth.user?.blue_verified" :label="auth.user?.verification_label" /><MembershipBadge :active="auth.user?.member_active" :tier-id="auth.user?.membership_tier_id" />
         </span>
         <AppIcon name="arrow" size="17" />
       </button>

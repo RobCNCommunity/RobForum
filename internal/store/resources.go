@@ -24,6 +24,10 @@ type ResourceFileInput struct {
 }
 
 func (s *Store) CreateResource(creatorID int64, title, description, game, version, resourceType string, priceCents int64, file ResourceFileInput) (domain.Resource, error) {
+	return s.CreateResourceWithMedia(creatorID, title, description, game, version, resourceType, priceCents, file, nil)
+}
+
+func (s *Store) CreateResourceWithMedia(creatorID int64, title, description, game, version, resourceType string, priceCents int64, file ResourceFileInput, media []ResourceMediaInput) (domain.Resource, error) {
 	title = strings.TrimSpace(title)
 	description = strings.TrimSpace(description)
 	game = strings.TrimSpace(game)
@@ -34,6 +38,9 @@ func (s *Store) CreateResource(creatorID int64, title, description, game, versio
 	}
 	if resourceType != "map" && resourceType != "script" && resourceType != "asset" && resourceType != "guide" && resourceType != "other" {
 		return domain.Resource{}, errors.New("resource type is invalid")
+	}
+	if len(media) > maxResourceMediaCount {
+		return domain.Resource{}, errors.New("too many resource preview images")
 	}
 	file.OriginalName = strings.TrimSpace(file.OriginalName)
 	file.StoredName = strings.TrimSpace(file.StoredName)
@@ -69,6 +76,9 @@ func (s *Store) CreateResource(creatorID int64, title, description, game, versio
 	if _, err := tx.Exec(`INSERT INTO resource_files (resource_id, original_name, stored_name, mime_type, size_bytes, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, resourceID, file.OriginalName, file.StoredName, file.MIMEType, file.SizeBytes, file.SHA256, now); err != nil {
 		return domain.Resource{}, err
 	}
+	if err := insertResourceMedia(tx, resourceID, media, now); err != nil {
+		return domain.Resource{}, err
+	}
 	item, err := getResource(tx, resourceID, false)
 	if err != nil {
 		return domain.Resource{}, err
@@ -87,16 +97,29 @@ func (s *Store) GetPublicResource(id int64) (domain.Resource, error) {
 	return getResource(s.db, id, true)
 }
 
-func getResource(queryer rowQueryer, id int64, public bool) (domain.Resource, error) {
+func getResource(queryer sqlQueryer, id int64, public bool) (domain.Resource, error) {
 	where := `WHERE r.id = ?`
 	if public {
 		where += ` AND r.status = 'approved' AND u.status = 'active'`
 	}
-	row := queryer.QueryRow(`SELECT r.id, r.creator_id, u.display_name, u.blue_verified, u.verification_label, r.title, r.description, r.game, r.version, r.resource_type, r.price_cents, r.status, r.review_reason, r.download_count, r.sales_count, r.created_at, r.updated_at, f.id, f.original_name, f.mime_type, f.size_bytes, f.sha256, f.created_at FROM resources r JOIN users u ON u.id = r.creator_id LEFT JOIN resource_files f ON f.resource_id = r.id `+where, id)
-	return scanResource(row)
+	row := queryer.QueryRow(`SELECT r.id, r.creator_id, u.display_name, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, r.title, r.description, r.game, r.version, r.resource_type, r.price_cents, r.status, r.review_reason, r.download_count, r.sales_count, r.created_at, r.updated_at, f.id, f.original_name, f.mime_type, f.size_bytes, f.sha256, f.created_at FROM resources r JOIN users u ON u.id = r.creator_id LEFT JOIN resource_files f ON f.resource_id = r.id `+where, id)
+	item, err := scanResource(row)
+	if err != nil {
+		return item, err
+	}
+	item.Media, err = getResourceMedia(queryer, id)
+	return item, err
 }
 
 func (s *Store) ListResources(status string, creatorID int64, limit int) ([]domain.Resource, error) {
+	return s.listResources(status, creatorID, "", limit)
+}
+
+func (s *Store) SearchPublicResources(query string, limit int) ([]domain.Resource, error) {
+	return s.listResources("approved", 0, query, limit)
+}
+
+func (s *Store) listResources(status string, creatorID int64, query string, limit int) ([]domain.Resource, error) {
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
@@ -117,8 +140,17 @@ func (s *Store) ListResources(status string, creatorID int64, limit int) ([]doma
 	if status == "approved" && creatorID == 0 {
 		where += " AND u.status = 'active'"
 	}
+	query = strings.TrimSpace(query)
+	if len([]rune(query)) > 100 {
+		return nil, errors.New("search query is too long")
+	}
+	if query != "" {
+		pattern := "%" + escapeLike(query) + "%"
+		where += ` AND (r.title LIKE ? ESCAPE '\\' OR r.description LIKE ? ESCAPE '\\' OR r.game LIKE ? ESCAPE '\\' OR r.version LIKE ? ESCAPE '\\' OR r.resource_type LIKE ? ESCAPE '\\' OR u.display_name LIKE ? ESCAPE '\\')`
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
 	args = append(args, limit)
-	rows, err := s.db.Query(`SELECT r.id, r.creator_id, u.display_name, u.blue_verified, u.verification_label, r.title, r.description, r.game, r.version, r.resource_type, r.price_cents, r.status, r.review_reason, r.download_count, r.sales_count, r.created_at, r.updated_at, f.id, f.original_name, f.mime_type, f.size_bytes, f.sha256, f.created_at FROM resources r JOIN users u ON u.id = r.creator_id LEFT JOIN resource_files f ON f.resource_id = r.id WHERE `+where+` ORDER BY r.updated_at DESC LIMIT ?`, args...)
+	rows, err := s.db.Query(`SELECT r.id, r.creator_id, u.display_name, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, r.title, r.description, r.game, r.version, r.resource_type, r.price_cents, r.status, r.review_reason, r.download_count, r.sales_count, r.created_at, r.updated_at, f.id, f.original_name, f.mime_type, f.size_bytes, f.sha256, f.created_at FROM resources r JOIN users u ON u.id = r.creator_id LEFT JOIN resource_files f ON f.resource_id = r.id WHERE `+where+` ORDER BY r.updated_at DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +163,13 @@ func (s *Store) ListResources(status string, creatorID int64, limit int) ([]doma
 		}
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := attachResourceMedia(s.db, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Store) ReviewResource(actorID, resourceID int64, status, reason string) (domain.Resource, error) {
@@ -213,6 +251,33 @@ func (s *Store) ResourceDownload(id int64) (domain.Resource, string, error) {
 	return item, storedName, nil
 }
 
+// ResourceDownloadForAdmin returns a resource file regardless of moderation
+// status. It is used only behind the admin middleware so pending files can be
+// inspected without making them public or incrementing download counters.
+func (s *Store) ResourceDownloadForAdmin(id int64) (domain.Resource, string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.Resource{}, "", err
+	}
+	defer tx.Rollback()
+	var lockedID int64
+	if err := tx.QueryRow(`SELECT id FROM resources WHERE id = ? FOR UPDATE`, id).Scan(&lockedID); err != nil {
+		return domain.Resource{}, "", err
+	}
+	item, err := getResource(tx, id, false)
+	if err != nil {
+		return domain.Resource{}, "", err
+	}
+	var storedName string
+	if err := tx.QueryRow(`SELECT stored_name FROM resource_files WHERE resource_id = ?`, id).Scan(&storedName); err != nil {
+		return domain.Resource{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Resource{}, "", err
+	}
+	return item, storedName, nil
+}
+
 func (s *Store) IncrementResourceDownload(id int64) error {
 	result, err := s.db.Exec(`UPDATE resources r JOIN users u ON u.id = r.creator_id SET r.download_count = r.download_count + 1 WHERE r.id = ? AND r.status = 'approved' AND u.status = 'active'`, id)
 	if err != nil {
@@ -233,12 +298,12 @@ type rowScanner interface {
 
 func scanResource(scanner rowScanner) (domain.Resource, error) {
 	var item domain.Resource
-	var creatorVerified int
+	var creatorVerified, creatorMember int
 	var fileID sql.NullInt64
 	var originalName, mimeType, sha256 sql.NullString
 	var sizeBytes sql.NullInt64
 	var fileCreated sql.NullTime
-	err := scanner.Scan(&item.ID, &item.CreatorID, &item.CreatorName, &creatorVerified, &item.CreatorVerificationLabel, &item.Title, &item.Description, &item.Game, &item.Version, &item.ResourceType, &item.PriceCents, &item.Status, &item.ReviewReason, &item.DownloadCount, &item.SalesCount, &item.CreatedAt, &item.UpdatedAt, &fileID, &originalName, &mimeType, &sizeBytes, &sha256, &fileCreated)
+	err := scanner.Scan(&item.ID, &item.CreatorID, &item.CreatorName, &creatorVerified, &item.CreatorVerificationLabel, &creatorMember, &item.CreatorMembershipTierID, &item.Title, &item.Description, &item.Game, &item.Version, &item.ResourceType, &item.PriceCents, &item.Status, &item.ReviewReason, &item.DownloadCount, &item.SalesCount, &item.CreatedAt, &item.UpdatedAt, &fileID, &originalName, &mimeType, &sizeBytes, &sha256, &fileCreated)
 	if err != nil {
 		return item, err
 	}
@@ -246,5 +311,6 @@ func scanResource(scanner rowScanner) (domain.Resource, error) {
 		item.File = &domain.ResourceFile{ID: fileID.Int64, ResourceID: item.ID, OriginalName: originalName.String, MIMEType: mimeType.String, SizeBytes: sizeBytes.Int64, SHA256: sha256.String, CreatedAt: fileCreated.Time}
 	}
 	item.CreatorVerified = creatorVerified != 0
+	item.CreatorMember = creatorMember != 0
 	return item, nil
 }

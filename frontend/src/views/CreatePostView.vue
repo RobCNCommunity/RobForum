@@ -166,17 +166,23 @@ async function submit() {
 </template>
 
 <style scoped>
-.rf-create-post { padding: 8px 20px 28px; }
-.rf-create-form { background: transparent; }
+.rf-create-post { min-height: 100%; padding: 8px 20px 28px; color: var(--rf-text); background: var(--rf-bg); }
+.rf-create-form { color: var(--rf-text); background: transparent; }
 .rf-create-form :deep(.nut-form-item) { padding: 17px 0; border-bottom: 1px solid var(--rf-line); background: transparent; }
 .rf-create-form :deep(.nut-form-item__label) { width: 72px; color: var(--rf-text); font-weight: 650; }
-.rf-create-form :deep(.nut-form-item__body) { min-width: 0; flex: 1; }
+.rf-create-form :deep(.nut-form-item__body),
+.rf-create-form :deep(.nut-form-item__body__slots) { min-width: 0; flex: 1; color: var(--rf-text); background: transparent; }
 .rf-create-form :deep(.nut-form-item__body__slots),
 .rf-create-form :deep(.nut-input),
 .rf-create-form :deep(.nut-textarea),
 .rf-create-form :deep(.nut-textarea__textarea) { width: 100%; min-width: 0; }
 .rf-create-form :deep(.nut-input),
 .rf-create-form :deep(.nut-textarea) { padding: 0; background: transparent; }
+.rf-create-form :deep(input),
+.rf-create-form :deep(textarea),
+.rf-create-form :deep(select) { color: var(--rf-text); caret-color: var(--primary); }
+.rf-create-form :deep(input::placeholder),
+.rf-create-form :deep(textarea::placeholder) { color: var(--rf-muted); opacity: 1; }
 .rf-create-title-input { width: 100%; min-width: 0; height: 44px; padding: 0 12px; border: 0; border-radius: 12px; outline: 0; color: var(--rf-text); background: var(--rf-bg-subtle); }
 .rf-create-title-input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 15%, transparent); }
 .rf-board-select {
@@ -188,6 +194,7 @@ async function submit() {
   color: var(--rf-text);
   background: var(--rf-bg);
 }
+.rf-board-select option { color: var(--rf-text); background: var(--rf-bg); }
 .rf-post-type-options { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .rf-post-type-options > button { display: grid; min-width: 0; min-height: 58px; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--rf-line); border-radius: 8px; color: var(--rf-text); background: var(--rf-bg); text-align: left; transition: border-color .16s ease, background-color .16s ease, color .16s ease; }
 .rf-post-type-options > button:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--rf-line)); background: var(--rf-bg-hover); }
@@ -198,12 +205,17 @@ async function submit() {
 .rf-post-type-options strong { font-size: 14px; }
 .rf-post-type-options small { overflow: hidden; color: var(--rf-muted); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .rf-content-item :deep(.nut-form-item__body) { align-items: flex-start; }
-.rf-content-item :deep(textarea) { min-height: 220px; line-height: 1.65; resize: vertical; }
+.rf-content-item :deep(.nut-textarea) { overflow: hidden; padding: 12px 12px 32px !important; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg-subtle) !important; }
+.rf-content-item :deep(.nut-textarea__textarea) { min-height: 220px; color: var(--rf-text) !important; background: transparent !important; line-height: 1.65; resize: vertical; }
+.rf-content-item :deep(.nut-textarea__limit) { right: 12px; bottom: 9px; color: var(--rf-muted); background: transparent; font-size: 12px; font-variant-numeric: tabular-nums; }
 .rf-upload-item :deep(.nut-form-item__body),
 .rf-upload-item :deep(.nut-form-item__body__slots) { width: 100%; }
 .rf-upload-head { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 11px; }
 .rf-upload-head span { color: var(--rf-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .rf-upload-item :deep(.nut-uploader__preview) { border-radius: 10px; }
+.rf-upload-item :deep(.nut-uploader),
+.rf-upload-item :deep(.nut-uploader__preview-list) { color: var(--rf-text); background: transparent !important; }
+.rf-upload-item :deep(.nut-uploader__upload) { color: var(--rf-muted); background: var(--rf-bg-subtle) !important; }
 .rf-create-actions {
   display: flex;
   justify-content: flex-end;
@@ -229,7 +241,7 @@ async function submit() {
   .rf-post-type-options small { display: none; }
   .rf-upload-item :deep(.nut-uploader) { width: 100%; }
   .rf-upload-item :deep(.nut-uploader__preview-list) { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .rf-content-item :deep(textarea) { min-height: 180px; }
+  .rf-content-item :deep(.nut-textarea__textarea) { min-height: 180px; }
   .rf-create-actions { position: static; padding: 18px 0 8px; background: transparent; }
   .rf-create-actions .nut-button { flex: 1; }
 }

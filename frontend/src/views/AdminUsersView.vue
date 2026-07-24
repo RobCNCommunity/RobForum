@@ -14,6 +14,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
+import MembershipBadge from '@/components/MembershipBadge.vue'
 
 type UserAction = 'banned' | 'active' | 'deleted'
 
@@ -114,7 +115,7 @@ onMounted(load)
       <article v-for="item in items" :key="item.id" class="rf-admin-user-row">
         <UserAvatar :src="item.avatar_url" :name="item.display_name" :size="44" />
         <div class="rf-admin-user-main">
-          <div class="rf-admin-user-name"><strong>{{ item.display_name }}</strong><VerifiedBadge :verified="item.blue_verified" :label="item.verification_label" /><span v-if="item.role === 'admin'" class="rf-status-chip is-on">管理员</span></div>
+          <div class="rf-admin-user-name"><strong>{{ item.display_name }}</strong><VerifiedBadge :verified="item.blue_verified" :label="item.verification_label" /><MembershipBadge :active="item.member_active" :tier-id="item.membership_tier_id" /><span v-if="item.role === 'admin'" class="rf-status-chip is-on">管理员</span></div>
           <span>{{ item.email }}</span><small>#{{ item.id }} · 注册于 {{ new Date(item.created_at).toLocaleString('zh-CN') }}</small>
         </div>
         <div class="rf-admin-user-counts"><span><strong>{{ item.post_count }}</strong>帖子</span><span><strong>{{ item.comment_count }}</strong>评论</span><span><strong>{{ item.resource_count }}</strong>资源</span></div>

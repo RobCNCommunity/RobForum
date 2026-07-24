@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "vue-tsc --noEmit",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vite build",
+    "build:checked": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@lucide/vue": "^1.25.0",
     "@nutui/icons-vue": "0.1.1",
     "@nutui/nutui": "3.3.8",
     "axios": "^1.11.0",

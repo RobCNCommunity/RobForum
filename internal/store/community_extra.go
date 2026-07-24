@@ -402,7 +402,15 @@ func (s *Store) UserWalletSummary(userID int64, limit int) (domain.WalletSummary
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
-	available, err := s.CreatorBalance(userID)
+	available, err := s.WalletBalance(userID)
+	if err != nil {
+		return domain.WalletSummary{}, err
+	}
+	withdrawable, err := s.CreatorBalance(userID)
+	if err != nil {
+		return domain.WalletSummary{}, err
+	}
+	feePolicy, err := s.UserFeePolicy(userID)
 	if err != nil {
 		return domain.WalletSummary{}, err
 	}
@@ -419,7 +427,14 @@ func (s *Store) UserWalletSummary(userID int64, limit int) (domain.WalletSummary
 		}
 		entries = append(entries, item)
 	}
-	return domain.WalletSummary{AvailableCents: available, Entries: entries}, rows.Err()
+	if err := rows.Err(); err != nil {
+		return domain.WalletSummary{}, err
+	}
+	topUps, err := s.ListWalletTopUps(userID, 8)
+	if err != nil {
+		return domain.WalletSummary{}, err
+	}
+	return domain.WalletSummary{AvailableCents: available, WithdrawableCents: withdrawable, FeePolicy: feePolicy, Entries: entries, TopUps: topUps}, nil
 }
 
 func (s *Store) EnsureCommunitySeeds() error {

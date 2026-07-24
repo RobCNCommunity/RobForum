@@ -8,13 +8,18 @@ const router = createRouter({
     { path: '/boards/:slug', component: () => import('./views/HomeView.vue'), meta: { title: '社区板块' } },
     { path: '/posts/:id', component: () => import('./views/PostView.vue'), meta: { title: '帖子详情' } },
     { path: '/posts/new', component: () => import('./views/CreatePostView.vue'), meta: { requiresAuth: true, title: '发布新帖' } },
+    { path: '/search', component: () => import('./views/SearchView.vue'), meta: { title: '搜索' } },
     { path: '/resources', component: () => import('./views/ResourceView.vue'), meta: { title: '资源中心' } },
+    { path: '/resources/new', component: () => import('./views/CreateResourceView.vue'), meta: { requiresAuth: true, title: '发布资源' } },
+    { path: '/resources/:id', component: () => import('./views/ResourceDetailView.vue'), meta: { title: '资源详情' } },
     { path: '/users', component: () => import('./views/UserSearchView.vue'), meta: { title: '用户发现' } },
     { path: '/users/:userID', component: () => import('./views/UserProfileView.vue'), meta: { title: '个人主页' } },
     { path: '/messages', component: () => import('./views/MessagesView.vue'), meta: { requiresAuth: true, title: '私信与群聊' } },
+    { path: '/messages/join', component: () => import('./views/GroupJoinView.vue'), meta: { requiresAuth: true, title: '加入群聊' } },
     { path: '/notifications', component: () => import('./views/NotificationsView.vue'), meta: { requiresAuth: true, title: '通知' } },
     { path: '/bookmarks', component: () => import('./views/BookmarksView.vue'), meta: { requiresAuth: true, title: '收藏' } },
     { path: '/wallet', component: () => import('./views/WalletView.vue'), meta: { requiresAuth: true, title: '我的钱包' } },
+    { path: '/membership', component: () => import('./views/MembershipView.vue'), meta: { requiresAuth: true, title: '会员中心' } },
     { path: '/settings/profile', component: () => import('./views/ProfileSettingsView.vue'), meta: { requiresAuth: true, title: '资料设置' } },
     { path: '/verification/apply', component: () => import('./views/VerificationApplyView.vue'), meta: { requiresAuth: true, title: '蓝微认证' } },
     { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },
@@ -26,6 +31,7 @@ const router = createRouter({
     { path: '/admin/settings', component: () => import('./views/AdminSettingsView.vue'), meta: { admin: true, title: '系统设置' } },
     { path: '/admin/resources', component: () => import('./views/AdminResourcesView.vue'), meta: { admin: true, title: '资源审核' } },
     { path: '/admin/payouts', component: () => import('./views/AdminPayoutsView.vue'), meta: { admin: true, title: '提现审核' } },
+    { path: '/admin/wallet', component: () => import('./views/AdminWalletView.vue'), meta: { admin: true, title: '钱包与兑换码' } },
     { path: '/admin/verifications', component: () => import('./views/AdminVerificationsView.vue'), meta: { admin: true, title: '蓝微审核' } },
     { path: '/admin/users', component: () => import('./views/AdminUsersView.vue'), meta: { admin: true, title: '用户管理' } },
     { path: '/admin/posts', component: () => import('./views/AdminPostsView.vue'), meta: { admin: true, title: '内容审核' } },
@@ -55,7 +61,7 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   await auth.bootstrap()
   if (to.meta.admin && !auth.isAdmin) return auth.isAuthenticated ? '/' : '/login'
-  if (to.meta.requiresAuth && !auth.isAuthenticated) return '/login'
+  if (to.meta.requiresAuth && !auth.isAuthenticated) return { path: '/login', query: { redirect: to.fullPath } }
   if (to.meta.public && auth.isAuthenticated && ['/login', '/register'].includes(to.path)) return '/'
   return true
 })

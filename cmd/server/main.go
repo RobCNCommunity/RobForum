@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"roblox-community/internal/app"
+	"roblox-community/internal/contentmoderation"
 	"roblox-community/internal/store"
 )
 
@@ -38,9 +39,13 @@ func main() {
 		panic(err)
 	}
 	publicURL := os.Getenv("ROBLOX_PUBLIC_URL")
-	server := app.New(data, staticDir, uploadDir, publicURL, slog.Default())
+	moderator, err := contentmoderation.FromEnvService()
+	if err != nil {
+		panic(err)
+	}
+	server := app.NewWithModeration(data, staticDir, uploadDir, publicURL, slog.Default(), moderator)
 	addr := getenv("ROBLOX_ADDR", ":8088")
-	slog.Info("roblox community listening", "addr", addr, "db_driver", driver)
+	slog.Info("roblox community listening", "addr", addr, "db_driver", driver, "content_moderation_enabled", moderator.Enabled())
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           server.Router(),

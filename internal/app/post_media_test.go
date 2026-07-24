@@ -37,7 +37,7 @@ func multipartImageHeader(t *testing.T, filename string, content []byte) *multip
 
 func testPNG(t *testing.T) []byte {
 	t.Helper()
-	imageData := image.NewRGBA(image.Rect(0, 0, 3, 2))
+	imageData := image.NewRGBA(image.Rect(0, 0, 32, 24))
 	imageData.Set(1, 1, color.RGBA{R: 29, G: 155, B: 240, A: 255})
 	var content bytes.Buffer
 	if err := png.Encode(&content, imageData); err != nil {
@@ -52,7 +52,7 @@ func TestSavePostMedia(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid image rejected: %v", err)
 	}
-	if input.MIMEType != "image/png" || input.Width != 3 || input.Height != 2 || input.SizeBytes < 1 {
+	if input.MIMEType != "image/png" || input.Width != 32 || input.Height != 24 || input.SizeBytes < 1 {
 		t.Fatalf("unexpected media metadata: %+v", input)
 	}
 	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {

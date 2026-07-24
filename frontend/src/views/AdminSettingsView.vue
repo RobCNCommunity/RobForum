@@ -20,6 +20,7 @@ import {
 } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
+import MembershipSettingsPanel from '@/components/MembershipSettingsPanel.vue'
 import PaymentSettingsCard from '@/components/PaymentSettingsCard.vue'
 import { useSiteStore } from '@/stores/site'
 
@@ -214,6 +215,8 @@ function adapterLabel(value: string) {
           <div class="rf-form-actions"><nut-button type="primary" :loading="savingSite" @click="saveSite">保存社区设置</nut-button></div>
         </form>
       </section>
+
+      <MembershipSettingsPanel />
 
       <section class="setting-card">
         <header class="rf-panel-heading"><div><h3><AppIcon name="message" size="18" />SMTP 邮件</h3><p>用于注册验证码、密码重置和后台测试邮件。</p></div><span class="rf-status-chip" :class="smtp.enabled ? 'is-on' : ''">{{ smtp.enabled ? '已启用' : '未启用' }}</span></header>

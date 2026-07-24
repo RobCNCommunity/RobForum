@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
 import {
@@ -13,6 +13,8 @@ import {
   fetchPostLike,
   fetchRepostStatus,
   pinPost,
+  reportComment,
+  reportPost,
   toggleCommentLike,
   togglePostBookmark,
   togglePostLike,
@@ -22,10 +24,12 @@ import {
 } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
+import ContentReportDialog from '@/components/ContentReportDialog.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import PostMediaGrid from '@/components/PostMediaGrid.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
+import MembershipBadge from '@/components/MembershipBadge.vue'
 import { postTypeLabel } from '@/postTypes'
 
 const route = useRoute()
@@ -34,6 +38,9 @@ const auth = useAuthStore()
 const post = ref<Post | null>(null)
 const comments = ref<Comment[]>([])
 const comment = ref('')
+const commentFiles = ref<File[]>([])
+const commentPreviewURLs = ref<string[]>([])
+const commentFileInput = ref<HTMLInputElement | null>(null)
 const replyInput = ref<HTMLTextAreaElement | null>(null)
 const loading = ref(true)
 const pinning = ref(false)
@@ -44,9 +51,12 @@ const reposting = ref(false)
 const busyCommentID = ref(0)
 const postMenuOpen = ref(false)
 const commentMenuID = ref(0)
+const reportTarget = ref<{ type: 'post' | 'comment'; id: number; label: string } | null>(null)
+const reporting = ref(false)
 
 const canPin = computed(() => auth.isAdmin)
 const authorHandle = computed(() => post.value ? `@user_${post.value.author_id}` : '')
+const reportOpen = computed(() => reportTarget.value !== null)
 
 function formatPostDate(value: string) {
   const date = new Date(value)
@@ -78,6 +88,7 @@ async function load() {
   loading.value = true
   postMenuOpen.value = false
   commentMenuID.value = 0
+  reportTarget.value = null
   try {
     const id = Number(route.params.id)
     if (!Number.isInteger(id) || id < 1) throw new Error('invalid post id')
@@ -121,11 +132,12 @@ function focusReply() {
 
 async function submitComment() {
   const content = comment.value.trim()
-  if (!post.value || !content || sending.value) return
+  if (!post.value || (!content && !commentFiles.value.length) || sending.value) return
   sending.value = true
   try {
-    comments.value.push(await createComment(post.value.id, content))
+    comments.value.push(await createComment(post.value.id, content, commentFiles.value))
     comment.value = ''
+    clearCommentFiles()
     post.value.comment_count += 1
     Notify.success('回复已发布')
   } catch (error) {
@@ -133,6 +145,31 @@ async function submitComment() {
   } finally {
     sending.value = false
   }
+}
+
+function chooseCommentFiles(event: Event) {
+  const files = Array.from((event.target as HTMLInputElement).files || [])
+  if (files.length > 4) Notify.warn('每条回复最多上传 4 张图片')
+  const limited = files.slice(0, 4)
+  const accepted = limited.filter((file) => file.size <= 5 * 1024 * 1024 && ['image/png', 'image/jpeg'].includes(file.type))
+  if (accepted.length !== limited.length) Notify.warn('回复图片仅支持 PNG/JPG，且单张不超过 5 MB')
+  commentPreviewURLs.value.forEach((url) => URL.revokeObjectURL(url))
+  commentFiles.value = accepted
+  commentPreviewURLs.value = accepted.map((file) => URL.createObjectURL(file))
+}
+
+function removeCommentFile(index: number) {
+  URL.revokeObjectURL(commentPreviewURLs.value[index])
+  commentFiles.value.splice(index, 1)
+  commentPreviewURLs.value.splice(index, 1)
+  if (commentFileInput.value) commentFileInput.value.value = ''
+}
+
+function clearCommentFiles() {
+  commentPreviewURLs.value.forEach((url) => URL.revokeObjectURL(url))
+  commentFiles.value = []
+  commentPreviewURLs.value = []
+  if (commentFileInput.value) commentFileInput.value.value = ''
 }
 
 async function togglePin() {
@@ -218,6 +255,47 @@ function canDelete(item: Comment) {
   return !!auth.user && (auth.isAdmin || auth.user.id === item.author_id)
 }
 
+function canReport(item: Comment) {
+  return !auth.user || auth.user.id !== item.author_id
+}
+
+function openPostReport() {
+  if (!post.value) return
+  postMenuOpen.value = false
+  if (!auth.user) {
+    requireLogin()
+    return
+  }
+  if (auth.user.id === post.value.author_id) return
+  reportTarget.value = { type: 'post', id: post.value.id, label: `帖子：${post.value.title}` }
+}
+
+function openCommentReport(item: Comment) {
+  commentMenuID.value = 0
+  if (!auth.user) {
+    requireLogin()
+    return
+  }
+  if (auth.user.id === item.author_id) return
+  reportTarget.value = { type: 'comment', id: item.id, label: `回复：${item.author_name}` }
+}
+
+async function submitReport(reason: string) {
+  const target = reportTarget.value
+  if (!target || reporting.value) return
+  reporting.value = true
+  try {
+    if (target.type === 'post') await reportPost(target.id, reason)
+    else await reportComment(target.id, reason)
+    reportTarget.value = null
+    Notify.success('举报已提交，审核结果会通知你')
+  } catch (error) {
+    Notify.danger(errorMessage(error, '举报提交失败'))
+  } finally {
+    reporting.value = false
+  }
+}
+
 async function removeComment(item: Comment) {
   commentMenuID.value = 0
   if (!window.confirm('确定删除这条回复吗？')) return
@@ -265,6 +343,7 @@ function openModeration() {
 
 watch(() => route.params.id, load)
 onMounted(load)
+onBeforeUnmount(clearCommentFiles)
 </script>
 
 <template>
@@ -289,7 +368,7 @@ onMounted(load)
               <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="48" />
             </RouterLink>
             <RouterLink :to="`/users/${post.author_id}`" class="rf-x-status-author-copy">
-              <span><strong>{{ post.author_name }}</strong><VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /></span>
+              <span><strong>{{ post.author_name }}</strong><VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /><MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" /></span>
               <small>{{ authorHandle }}</small>
             </RouterLink>
             <div class="rf-x-status-menu">
@@ -299,6 +378,7 @@ onMounted(load)
               <Transition name="rf-x-menu">
                 <div v-if="postMenuOpen" class="rf-x-status-menu-panel">
                   <button type="button" @click="postMenuOpen = false; copyLink()">复制帖子链接</button>
+                  <button v-if="!auth.user || auth.user.id !== post.author_id" type="button" class="danger" @click="openPostReport">举报帖子</button>
                   <button v-if="canPin" type="button" :disabled="pinning" @click="togglePin">{{ post.pinned ? '取消置顶' : '置顶帖子' }}</button>
                   <button v-if="canPin" type="button" class="danger" @click="openModeration">审核或删除</button>
                 </div>
@@ -338,9 +418,11 @@ onMounted(load)
           <UserAvatar :src="auth.user.avatar_url" :name="auth.user.display_name" :size="42" />
           <div>
             <textarea ref="replyInput" v-model="comment" rows="2" maxlength="5000" placeholder="发布你的回复" @keydown.ctrl.enter.prevent="submitComment" />
+            <div v-if="commentPreviewURLs.length" class="rf-comment-upload-previews"><figure v-for="(url, index) in commentPreviewURLs" :key="url"><img :src="url" alt="待发送图片" /><button type="button" aria-label="移除图片" @click="removeCommentFile(index)">×</button></figure></div>
             <footer>
+              <label class="rf-comment-upload-button" aria-label="添加图片"><AppIcon name="photo" size="19" /><input ref="commentFileInput" type="file" accept="image/png,image/jpeg" multiple @change="chooseCommentFiles" /></label>
               <span>{{ comment.length }}/5000</span>
-              <button type="submit" :disabled="!comment.trim() || sending">{{ sending ? '发布中' : '回复' }}</button>
+              <button type="submit" :disabled="(!comment.trim() && !commentFiles.length) || sending">{{ sending ? '发布中' : '回复' }}</button>
             </footer>
           </div>
         </form>
@@ -354,16 +436,17 @@ onMounted(load)
             <div class="rf-x-reply-body">
               <div class="rf-x-reply-meta">
                 <RouterLink :to="`/users/${item.author_id}`"><strong>{{ item.author_name }}</strong></RouterLink>
-                <VerifiedBadge :verified="item.author_verified" :label="item.author_verification_label" />
+                <VerifiedBadge :verified="item.author_verified" :label="item.author_verification_label" /><MembershipBadge :active="item.author_member" :tier-id="item.author_membership_tier_id" />
                 <span>@user_{{ item.author_id }}</span><span>·</span><time>{{ formatReplyDate(item.created_at) }}</time>
-                <div v-if="canDelete(item)" class="rf-x-reply-menu">
+                <div v-if="canDelete(item) || canReport(item)" class="rf-x-reply-menu">
                   <button type="button" aria-label="更多回复操作" :aria-expanded="commentMenuID === item.id" @click="commentMenuID = commentMenuID === item.id ? 0 : item.id"><AppIcon name="more" size="18" /></button>
                   <Transition name="rf-x-menu">
-                    <div v-if="commentMenuID === item.id"><button type="button" :disabled="busyCommentID === item.id" @click="removeComment(item)">删除回复</button></div>
+                    <div v-if="commentMenuID === item.id"><button v-if="canReport(item)" type="button" class="danger" :disabled="reporting" @click="openCommentReport(item)">举报回复</button><button v-if="canDelete(item)" type="button" class="danger" :disabled="busyCommentID === item.id" @click="removeComment(item)">删除回复</button></div>
                   </Transition>
                 </div>
               </div>
-              <p>{{ item.content }}</p>
+              <p v-if="item.content">{{ item.content }}</p>
+              <PostMediaGrid v-if="item.media?.length" :media="item.media" compact />
               <div class="rf-x-reply-actions">
                 <button type="button" aria-label="点赞回复" :class="{ liked: item.liked }" :disabled="busyCommentID === item.id" @click="likeComment(item)"><AppIcon name="heart" size="17" /><span>{{ formatCount(item.like_count) }}</span></button>
                 <button type="button" aria-label="复制回复链接" @click="copyLink(`${window.location.origin}${route.path}#reply-${item.id}`)"><AppIcon name="share" size="17" /></button>
@@ -374,6 +457,7 @@ onMounted(load)
         </section>
       </template>
     </section>
+    <ContentReportDialog :open="reportOpen" :target-label="reportTarget?.label || ''" :submitting="reporting" @close="reportTarget = null" @submit="submitReport" />
   </PageContainer>
 </template>
 
@@ -418,6 +502,13 @@ onMounted(load)
 .rf-x-reply-composer footer span { color: var(--rf-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .rf-x-reply-composer footer button { min-width: 68px; min-height: 34px; padding: 0 16px; border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-weight: 700; }
 .rf-x-reply-composer footer button:disabled { cursor: not-allowed; opacity: .45; }
+.rf-comment-upload-button { display: inline-grid; width: 34px; height: 34px; margin-right: auto; place-items: center; border-radius: 50%; color: var(--primary); cursor: pointer; transition: background-color 150ms ease-out; }
+.rf-comment-upload-button:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.rf-comment-upload-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.rf-comment-upload-previews { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; padding: 5px 0 10px; }
+.rf-comment-upload-previews figure { position: relative; aspect-ratio: 1 / 1; margin: 0; overflow: hidden; border-radius: 8px; background: var(--rf-bg-subtle); }
+.rf-comment-upload-previews img { width: 100%; height: 100%; object-fit: cover; }
+.rf-comment-upload-previews button { position: absolute; top: 4px; right: 4px; display: grid; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; place-items: center; border-radius: 50%; color: #fff; background: rgba(15, 20, 25, .72); font-size: 17px; }
 .rf-x-reply-login { width: 100%; min-height: 52px; border-bottom: 1px solid var(--rf-line); color: var(--primary); background: transparent; font-weight: 650; }
 .rf-x-reply-login:hover { background: var(--rf-bg-hover); }
 .rf-x-reply-row { display: flex; min-width: 0; gap: 10px; padding: 12px 16px 9px; border-bottom: 1px solid var(--rf-line); transition: background-color 150ms ease-out; }
@@ -428,12 +519,15 @@ onMounted(load)
 .rf-x-reply-meta strong { display: block; overflow: hidden; color: var(--rf-text); text-overflow: ellipsis; white-space: nowrap; }
 .rf-x-reply-meta > span, .rf-x-reply-meta time { flex: 0 0 auto; white-space: nowrap; }
 .rf-x-reply-body > p { margin: 2px 0 8px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rf-x-reply-body :deep(.rf-post-media-grid) { max-width: 480px; margin: 6px 0 8px; }
 .rf-x-reply-menu { position: relative; margin-left: auto; }
 .rf-x-reply-menu > button { display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--rf-muted); background: transparent; }
 .rf-x-reply-menu > button:hover { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }
 .rf-x-reply-menu > div { position: absolute; z-index: 10; top: 32px; right: 0; width: max-content; min-width: 136px; overflow: hidden; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg); box-shadow: 0 8px 24px rgba(15, 20, 25, .15); }
-.rf-x-reply-menu > div button { width: 100%; min-height: 42px; padding: 0 14px; color: var(--rf-danger); background: transparent; font-weight: 650; text-align: left; }
-.rf-x-reply-menu > div button:hover { background: color-mix(in srgb, var(--rf-danger) 8%, transparent); }
+.rf-x-reply-menu > div button { width: 100%; min-height: 42px; padding: 0 14px; color: var(--rf-text); background: transparent; font-weight: 650; text-align: left; }
+.rf-x-reply-menu > div button:hover { background: var(--rf-bg-hover); }
+.rf-x-reply-menu > div button.danger { color: var(--rf-danger); }
+.rf-x-reply-menu > div button.danger:hover { background: color-mix(in srgb, var(--rf-danger) 8%, transparent); }
 .rf-x-reply-actions { display: flex; max-width: 220px; align-items: center; justify-content: space-between; color: var(--rf-muted); }
 .rf-x-reply-actions button { display: inline-flex; min-width: 38px; min-height: 32px; align-items: center; gap: 5px; padding: 0 7px; border-radius: var(--rf-pill); color: inherit; background: transparent; font-size: 12px; }
 .rf-x-reply-actions button:hover, .rf-x-reply-actions button.liked { color: #f91880; background: rgba(249, 24, 128, .08); }

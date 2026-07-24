@@ -1,55 +1,113 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
 import { errorMessage, fetchPublicOAuth, type PublicOAuthConfig } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import HumanVerification from '@/components/HumanVerification.vue'
 import AppIcon from '@/components/AppIcon.vue'
+
+type LoginStep = 'email' | 'password'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const site = useSiteStore()
 const verification = ref<InstanceType<typeof HumanVerification> | null>(null)
-const formRef = ref<{ validate: () => Promise<unknown> } | null>(null)
+const emailInput = ref<HTMLInputElement | null>(null)
+const passwordInput = ref<HTMLInputElement | null>(null)
 const visible = ref(true)
-const captchaToken = ref('')
-const captchaRequired = ref(false)
+const step = ref<LoginStep>('email')
+const emailError = ref('')
+const passwordError = ref('')
+const showPassword = ref(false)
+const submitting = ref(false)
 const form = reactive({ email: '', password: '' })
 const oauth = ref<PublicOAuthConfig>({ enabled: false, provider_name: 'OAuth' })
 const isMobile = ref(typeof window !== 'undefined' && window.innerWidth <= 560)
 
-const rules = {
-  email: [
-    { required: true, message: '请输入邮箱' },
-    { regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: '请输入有效的邮箱地址' },
-  ],
-  password: [{ required: true, message: '请输入密码' }],
+const siteName = computed(() => site.settings?.site_name || '罗布玩家社区')
+const brandImage = computed(() => site.settings?.logo_url || site.settings?.avatar_url || '')
+const brandInitial = computed(() => siteName.value.trim().charAt(0).toUpperCase() || 'R')
+const headline = computed(() => step.value === 'email' ? '欢迎登录' : '输入你的密码')
+
+function safeDestination() {
+  const requested = typeof route.query.redirect === 'string'
+    ? route.query.redirect
+    : typeof route.query.return_to === 'string'
+      ? route.query.return_to
+      : '/'
+  return requested.startsWith('/') && !requested.startsWith('//') && !requested.includes('\\') ? requested : '/'
 }
 
 function goHome() {
-  if (router.currentRoute.value.path !== '/') router.push('/')
+  if (router.currentRoute.value.path === '/login') router.push('/')
+}
+
+function validateEmail() {
+  const email = form.email.trim()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    emailError.value = '请输入有效的邮箱地址'
+    return false
+  }
+  form.email = email
+  emailError.value = ''
+  return true
+}
+
+async function continueWithEmail() {
+  if (!validateEmail()) {
+    await nextTick()
+    emailInput.value?.focus()
+    return
+  }
+  step.value = 'password'
+  verification.value?.reset()
+  await nextTick()
+  passwordInput.value?.focus()
+}
+
+function returnToEmail() {
+  step.value = 'email'
+  passwordError.value = ''
+  verification.value?.reset()
+  nextTick(() => emailInput.value?.focus())
 }
 
 async function submit() {
-  if (captchaRequired.value && !captchaToken.value) {
-    Notify.warn('请先完成验证')
+  if (submitting.value) return
+  if (step.value === 'email') {
+    await continueWithEmail()
     return
   }
-  try {
-    await formRef.value?.validate()
-  } catch {
+  if (!validateEmail()) {
+    returnToEmail()
     return
   }
+  if (!form.password) {
+    passwordError.value = '请输入密码'
+    await nextTick()
+    passwordInput.value?.focus()
+    return
+  }
+  passwordError.value = ''
+  submitting.value = true
   try {
-    await auth.login(form.email.trim(), form.password, captchaToken.value)
+    const captchaToken = await verification.value?.verify() || ''
+    await auth.login(form.email, form.password, captchaToken)
     Notify.success('登录成功')
-    const requested = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-    const destination = requested.startsWith('/') && !requested.startsWith('//') && !requested.includes('\\') ? requested : '/'
-    await router.push(destination)
-  } catch (error) {
-    Notify.danger(errorMessage(error, '登录失败，请稍后重试'))
+    await router.push(safeDestination())
+  } catch (cause) {
+    if (cause instanceof Error && cause.message === 'captcha_cancelled') return
+    if (cause instanceof Error && cause.message.startsWith('captcha_')) {
+      Notify.danger('人机验证暂时无法完成，请稍后重试')
+      return
+    }
+    Notify.danger(errorMessage(cause, '邮箱或密码不正确，请重试'))
     verification.value?.reset()
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -63,9 +121,7 @@ function updateViewport() {
 }
 
 function oauthLogin() {
-  const requested = typeof route.query.return_to === 'string' ? route.query.return_to : '/'
-  const returnTo = requested.startsWith('/') && !requested.startsWith('//') ? requested : '/'
-  window.location.assign(`/api/v1/oauth/start?return_to=${encodeURIComponent(returnTo)}`)
+  window.location.assign(`/api/v1/oauth/start?return_to=${encodeURIComponent(safeDestination())}`)
 }
 
 onMounted(async () => {
@@ -82,18 +138,15 @@ onMounted(async () => {
     }
     Notify.danger(messages[failure] || '第三方登录失败，请重试')
   }
+  await nextTick()
+  emailInput.value?.focus()
 })
 
 onBeforeUnmount(() => window.removeEventListener('resize', updateViewport))
 </script>
 
 <template>
-  <div class="auth-page auth-page--popup" @keyup.enter="submit">
-    <div class="auth-backdrop-content" aria-hidden="true">
-      <AppIcon name="people" size="30" />
-      <p>加入社区，分享你的 Roblox 世界</p>
-    </div>
-
+  <div class="auth-page auth-page--popup">
     <nut-popup
       v-model:visible="visible"
       :position="isMobile ? 'bottom' : 'center'"
@@ -106,33 +159,88 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewport))
       pop-class="rf-login-popup"
       @closed="goHome"
     >
-      <section class="rf-login-dialog" aria-labelledby="login-title">
-        <div class="rf-login-mark"><AppIcon name="people" size="24" /></div>
-        <header class="auth-heading">
-          <h1 id="login-title">欢迎回来</h1>
-          <p>登录社区，继续你的 Roblox 旅程。</p>
+      <section class="rf-login-dialog" aria-labelledby="login-title" @keyup.enter="submit">
+        <div class="rf-login-brand-center" aria-hidden="true">
+          <img v-if="brandImage" :src="brandImage" :alt="siteName" />
+          <span v-else class="rf-login-brand-fallback">{{ brandInitial }}</span>
+        </div>
+        <header class="auth-heading rf-login-heading">
+          <h1 id="login-title">{{ headline }}</h1>
         </header>
 
-        <template v-if="oauth.enabled">
-          <nut-button class="rf-oauth-button" block plain type="default" size="large" @click="oauthLogin"><AppIcon name="link" size="19" />使用 {{ oauth.provider_name }} 继续</nut-button>
-          <nut-divider content-position="center">或使用邮箱登录</nut-divider>
+        <template v-if="step === 'email'">
+          <nut-form class="rf-auth-nut-form" aria-label="邮箱登录">
+            <nut-form-item label="邮箱">
+              <input
+                ref="emailInput"
+                v-model="form.email"
+                class="rf-auth-field-input"
+                type="email"
+                autocomplete="email"
+                inputmode="email"
+                placeholder="name@example.com"
+                :aria-invalid="Boolean(emailError)"
+                :aria-describedby="emailError ? 'login-email-error' : undefined"
+                @input="emailError = ''"
+                @blur="form.email && validateEmail()"
+              />
+            </nut-form-item>
+          </nut-form>
+          <p v-if="emailError" id="login-email-error" class="rf-auth-field-error" role="alert">{{ emailError }}</p>
+          <button type="button" class="rf-auth-action rf-auth-action--primary" @click="continueWithEmail">继续</button>
+
+          <template v-if="oauth.enabled">
+            <nut-divider content-position="center">或使用其他方式</nut-divider>
+            <button type="button" class="rf-auth-action rf-auth-action--secondary" @click="oauthLogin">
+              <AppIcon name="link" size="19" />
+              使用 {{ oauth.provider_name }} 继续
+            </button>
+          </template>
         </template>
 
-        <nut-form ref="formRef" :model-value="form" :rules="rules" class="rf-auth-nut-form">
-          <nut-form-item prop="email" label="邮箱">
-            <input v-model="form.email" class="rf-auth-field-input" type="email" autocomplete="email" placeholder="name@example.com" />
-          </nut-form-item>
-          <nut-form-item prop="password" label="密码">
-            <input v-model="form.password" class="rf-auth-field-input" type="password" autocomplete="current-password" placeholder="请输入密码" />
-          </nut-form-item>
-        </nut-form>
+        <template v-else>
+          <div class="rf-login-email-summary">
+            <span>{{ form.email }}</span>
+            <button type="button" @click="returnToEmail">修改</button>
+          </div>
+          <nut-form class="rf-auth-nut-form" aria-label="密码登录">
+            <nut-form-item label="密码">
+              <span class="rf-password-field">
+                <input
+                  ref="passwordInput"
+                  v-model="form.password"
+                  class="rf-auth-field-input"
+                  :type="showPassword ? 'text' : 'password'"
+                  autocomplete="current-password"
+                  placeholder="请输入密码"
+                  :aria-invalid="Boolean(passwordError)"
+                  :aria-describedby="passwordError ? 'login-password-error' : undefined"
+                  @input="passwordError = ''"
+                />
+                <button type="button" class="rf-password-toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" :title="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword">
+                  <AppIcon name="eye" size="18" />
+                </button>
+              </span>
+            </nut-form-item>
+          </nut-form>
+          <p v-if="passwordError" id="login-password-error" class="rf-auth-field-error" role="alert">{{ passwordError }}</p>
+          <div class="auth-forgot"><RouterLink to="/forgot-password">忘记密码？</RouterLink></div>
+          <HumanVerification ref="verification" />
+          <button
+            type="button"
+            class="rf-auth-action rf-auth-action--primary"
+            :disabled="submitting || auth.loading"
+            @click="submit"
+          >
+            <span v-if="submitting || auth.loading" class="rf-auth-action-spinner" aria-hidden="true" />
+            {{ submitting || auth.loading ? '正在登录' : '登录' }}
+          </button>
+        </template>
 
-        <div class="auth-forgot"><RouterLink to="/forgot-password">忘记密码？</RouterLink></div>
-        <HumanVerification ref="verification" @token="captchaToken = $event" @required="captchaRequired = $event" />
-        <nut-button type="primary" block size="large" :loading="auth.loading" :disabled="captchaRequired && !captchaToken" @click="submit">登录</nut-button>
-
-        <nut-divider content-position="center">还没有账号？</nut-divider>
-        <nut-button block plain type="default" size="large" @click="openRegister">创建账号</nut-button>
+        <footer class="rf-login-footer">
+          <span>还没有账号？</span>
+          <button type="button" @click="openRegister">创建账号</button>
+        </footer>
       </section>
     </nut-popup>
   </div>

@@ -9,6 +9,8 @@ import (
 	"roblox-community/internal/domain"
 )
 
+var ErrProfileUnavailable = errors.New("个人资料正在审核中，暂时无法修改")
+
 func (s *Store) UpdateUserProfile(userID int64, displayName, bio string) (domain.User, error) {
 	displayName = strings.TrimSpace(displayName)
 	bio = strings.TrimSpace(bio)
@@ -23,7 +25,7 @@ func (s *Store) UpdateUserProfile(userID int64, displayName, bio string) (domain
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE users SET display_name = ?, bio = ?, updated_at = ? WHERE id = ? AND status = 'active'`, displayName, bio, time.Now().UTC(), userID)
+	result, err := tx.Exec(`UPDATE users SET display_name = ?, bio = ?, updated_at = ? WHERE id = ? AND status = 'active' AND profile_status = 'active'`, displayName, bio, time.Now().UTC(), userID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -31,7 +33,7 @@ func (s *Store) UpdateUserProfile(userID int64, displayName, bio string) (domain
 		if err != nil {
 			return domain.User{}, err
 		}
-		return domain.User{}, sql.ErrNoRows
+		return domain.User{}, ErrProfileUnavailable
 	}
 	user, err := getUser(tx, userID)
 	if err != nil {
@@ -53,7 +55,7 @@ func (s *Store) UpdateUserAvatar(userID int64, avatarURL string) (domain.User, e
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ? AND status = 'active'`, avatarURL, time.Now().UTC(), userID)
+	result, err := tx.Exec(`UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ? AND status = 'active' AND profile_status = 'active'`, avatarURL, time.Now().UTC(), userID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -61,7 +63,7 @@ func (s *Store) UpdateUserAvatar(userID int64, avatarURL string) (domain.User, e
 		if err != nil {
 			return domain.User{}, err
 		}
-		return domain.User{}, sql.ErrNoRows
+		return domain.User{}, ErrProfileUnavailable
 	}
 	user, err := getUser(tx, userID)
 	if err != nil {
@@ -83,7 +85,7 @@ func (s *Store) UpdateUserCover(userID int64, coverURL string) (domain.User, err
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE users SET cover_url = ?, updated_at = ? WHERE id = ? AND status = 'active'`, coverURL, time.Now().UTC(), userID)
+	result, err := tx.Exec(`UPDATE users SET cover_url = ?, updated_at = ? WHERE id = ? AND status = 'active' AND profile_status = 'active'`, coverURL, time.Now().UTC(), userID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -91,7 +93,7 @@ func (s *Store) UpdateUserCover(userID int64, coverURL string) (domain.User, err
 		if err != nil {
 			return domain.User{}, err
 		}
-		return domain.User{}, sql.ErrNoRows
+		return domain.User{}, ErrProfileUnavailable
 	}
 	user, err := getUser(tx, userID)
 	if err != nil {
@@ -105,9 +107,10 @@ func (s *Store) UpdateUserCover(userID int64, coverURL string) (domain.User, err
 
 func (s *Store) GetPublicUser(userID int64) (domain.PublicUser, error) {
 	var user domain.PublicUser
-	var blueVerified, robloxVerified int
-	err := s.db.QueryRow(`SELECT id, display_name, avatar_url, cover_url, bio, blue_verified, verification_label, roblox_name, roblox_verified, created_at FROM users WHERE id = ? AND status = 'active'`, userID).Scan(&user.ID, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &blueVerified, &user.VerificationLabel, &user.RobloxName, &robloxVerified, &user.CreatedAt)
+	var blueVerified, memberActive, robloxVerified int
+	err := s.db.QueryRow(`SELECT id, display_name, avatar_url, cover_url, bio, blue_verified, verification_label, COALESCE(membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP() THEN membership_tier_id ELSE 0 END, roblox_name, roblox_verified, created_at FROM users WHERE id = ? AND status = 'active' AND profile_status = 'active'`, userID).Scan(&user.ID, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &blueVerified, &user.VerificationLabel, &memberActive, &user.MembershipTierID, &user.RobloxName, &robloxVerified, &user.CreatedAt)
 	user.BlueVerified = blueVerified != 0
+	user.MemberActive = memberActive != 0
 	user.RobloxVerified = robloxVerified != 0
 	return user, err
 }
@@ -139,7 +142,7 @@ func (s *Store) ListUserPosts(userID int64, limit int) ([]domain.Post, error) {
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
-	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.author_id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' ORDER BY p.updated_at DESC LIMIT ?`, userID, limit)
+	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.author_id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND u.profile_status = 'active' ORDER BY p.updated_at DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +150,12 @@ func (s *Store) ListUserPosts(userID int64, limit int) ([]domain.Post, error) {
 	result := make([]domain.Post, 0)
 	for rows.Next() {
 		var item domain.Post
-		var authorVerified, pinned, featured int
-		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var authorVerified, authorMember, pinned, featured int
+		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.AuthorVerified = authorVerified != 0
+		item.AuthorMember = authorMember != 0
 		item.Pinned = pinned != 0
 		item.Featured = featured != 0
 		result = append(result, item)
@@ -280,8 +284,19 @@ func (s *Store) ReviewVerificationApplication(actorID, applicationID int64, stat
 	if err := tx.QueryRow(`SELECT user_id, status, requested_label FROM verification_applications WHERE id = ? FOR UPDATE`, applicationID).Scan(&userID, &currentStatus, &requestedLabel); err != nil {
 		return domain.VerificationApplication{}, err
 	}
-	if currentStatus != "pending" {
-		return domain.VerificationApplication{}, errors.New("只有待审核申请可以处理")
+	var userStatus string
+	if err := tx.QueryRow(`SELECT status FROM users WHERE id = ? FOR UPDATE`, userID).Scan(&userStatus); err != nil {
+		return domain.VerificationApplication{}, err
+	}
+	if status == "approved" && userStatus != "active" {
+		return domain.VerificationApplication{}, errors.New("认证用户不存在或已停用")
+	}
+	revokingApproved := currentStatus == "approved" && status == "rejected"
+	if currentStatus != "pending" && !revokingApproved {
+		return domain.VerificationApplication{}, errors.New("只有待审核申请可以处理，已通过申请只能撤销认证")
+	}
+	if revokingApproved && note == "" {
+		return domain.VerificationApplication{}, errors.New("撤销认证时必须填写原因")
 	}
 	if status == "approved" {
 		if label == "" {
@@ -296,18 +311,29 @@ func (s *Store) ReviewVerificationApplication(actorID, applicationID int64, stat
 		return domain.VerificationApplication{}, err
 	}
 	if status == "approved" {
-		result, err := tx.Exec(`UPDATE users SET blue_verified = 1, verification_label = ?, updated_at = ? WHERE id = ? AND status = 'active'`, label, now, userID)
-		if err != nil {
+		if _, err := tx.Exec(`UPDATE users SET blue_verified = 1, verification_label = ?, updated_at = ? WHERE id = ?`, label, now, userID); err != nil {
 			return domain.VerificationApplication{}, err
 		}
-		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
-			if err != nil {
+	} else if revokingApproved {
+		var replacementLabel string
+		err := tx.QueryRow(`SELECT requested_label FROM verification_applications WHERE user_id = ? AND status = 'approved' AND id <> ? ORDER BY reviewed_at DESC, id DESC LIMIT 1`, userID, applicationID).Scan(&replacementLabel)
+		if errors.Is(err, sql.ErrNoRows) {
+			if _, err := tx.Exec(`UPDATE users SET blue_verified = 0, verification_label = '', updated_at = ? WHERE id = ?`, now, userID); err != nil {
 				return domain.VerificationApplication{}, err
 			}
-			return domain.VerificationApplication{}, errors.New("认证用户不存在或已停用")
+		} else if err != nil {
+			return domain.VerificationApplication{}, err
+		} else {
+			if _, err := tx.Exec(`UPDATE users SET blue_verified = 1, verification_label = ?, updated_at = ? WHERE id = ?`, replacementLabel, now, userID); err != nil {
+				return domain.VerificationApplication{}, err
+			}
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'verification', ?, ?, ?, ?)`, actorID, applicationID, status, note, now); err != nil {
+	action := status
+	if revokingApproved {
+		action = "revoked"
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'verification', ?, ?, ?, ?)`, actorID, applicationID, action, note, now); err != nil {
 		return domain.VerificationApplication{}, err
 	}
 	item, err := getVerificationApplication(tx, applicationID)

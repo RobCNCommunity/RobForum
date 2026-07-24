@@ -171,13 +171,18 @@ func (s *Store) CreateResourceOrder(userID, resourceID int64) (domain.CommerceOr
 	if creatorID == userID {
 		return domain.CommerceOrder{}, errors.New("creators cannot buy their own resources")
 	}
+	feePolicy, err := feePolicyWithQuery(tx, creatorID, true)
+	if err != nil {
+		return domain.CommerceOrder{}, err
+	}
+	serviceFeeCents := feeAmountCents(priceCents, feePolicy.ServiceFeeBPS)
+	creatorShareCents := priceCents - serviceFeeCents
 	var resourceFileID int64
 	if err := tx.QueryRow(`SELECT id FROM resource_files WHERE resource_id = ? FOR UPDATE`, resourceID).Scan(&resourceFileID); err != nil {
 		return domain.CommerceOrder{}, errors.New("resource file is not available")
 	}
-	var existingID int64
-	if err := tx.QueryRow(`SELECT id FROM commerce_orders WHERE user_id = ? AND resource_id = ? AND status = 'paid' ORDER BY id DESC LIMIT 1`, userID, resourceID).Scan(&existingID); err == nil {
-		item, err := getCommerceOrder(tx, existingID)
+	if purchasedOrderID, err := resourcePurchaseOrderForUpdate(tx, userID, resourceID); err == nil {
+		item, err := getCommerceOrder(tx, purchasedOrderID)
 		if err != nil {
 			return domain.CommerceOrder{}, err
 		}
@@ -188,12 +193,19 @@ func (s *Store) CreateResourceOrder(userID, resourceID int64) (domain.CommerceOr
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return domain.CommerceOrder{}, err
 	}
+	var existingID int64
 	if err := tx.QueryRow(`SELECT id FROM commerce_orders WHERE user_id = ? AND resource_id = ? AND status = 'pending' AND created_at > ? ORDER BY id DESC LIMIT 1`, userID, resourceID, time.Now().UTC().Add(-30*time.Minute)).Scan(&existingID); err == nil {
+		if _, err := tx.Exec(`UPDATE commerce_orders SET service_fee_bps = ?, service_fee_cents = ?, creator_share_cents = ?, seller_membership_tier_id = ?, seller_membership_tier_name = ?, updated_at = ? WHERE id = ? AND service_fee_bps = 0 AND service_fee_cents = 0 AND creator_share_cents = 0`, feePolicy.ServiceFeeBPS, serviceFeeCents, creatorShareCents, nullablePositiveID(feePolicy.MembershipTierID), feePolicy.MembershipTierName, time.Now().UTC(), existingID); err != nil {
+			return domain.CommerceOrder{}, err
+		}
 		item, err := getCommerceOrder(tx, existingID)
 		if err != nil {
 			return domain.CommerceOrder{}, err
 		}
-		if err := tx.Rollback(); err != nil {
+		// A legacy pending order may have received its first immutable fee
+		// snapshot above. Commit that snapshot instead of silently discarding it
+		// and recalculating against a later membership state at callback time.
+		if err := tx.Commit(); err != nil {
 			return domain.CommerceOrder{}, err
 		}
 		return item, nil
@@ -205,7 +217,7 @@ func (s *Store) CreateResourceOrder(userID, resourceID int64) (domain.CommerceOr
 		return domain.CommerceOrder{}, err
 	}
 	now := time.Now().UTC()
-	result, err := tx.Exec(`INSERT INTO commerce_orders (order_no, user_id, resource_id, amount_cents, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)`, orderNo, userID, resourceID, priceCents, now, now)
+	result, err := tx.Exec(`INSERT INTO commerce_orders (order_no, user_id, resource_id, amount_cents, service_fee_bps, service_fee_cents, creator_share_cents, seller_membership_tier_id, seller_membership_tier_name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`, orderNo, userID, resourceID, priceCents, feePolicy.ServiceFeeBPS, serviceFeeCents, creatorShareCents, nullablePositiveID(feePolicy.MembershipTierID), feePolicy.MembershipTierName, now, now)
 	if err != nil {
 		return domain.CommerceOrder{}, err
 	}
@@ -244,7 +256,11 @@ func (s *Store) GetCommerceOrder(id int64) (domain.CommerceOrder, error) {
 func getCommerceOrder(queryer rowQueryer, id int64) (domain.CommerceOrder, error) {
 	var item domain.CommerceOrder
 	var paidAt sql.NullTime
-	err := queryer.QueryRow(`SELECT o.id, o.order_no, o.user_id, o.resource_id, r.title, o.amount_cents, o.status, o.gateway_trade_no, o.paid_at, o.created_at FROM commerce_orders o JOIN resources r ON r.id = o.resource_id WHERE o.id = ?`, id).Scan(&item.ID, &item.OrderNo, &item.UserID, &item.ResourceID, &item.ResourceTitle, &item.AmountCents, &item.Status, &item.GatewayTradeNo, &paidAt, &item.CreatedAt)
+	var sellerTierID sql.NullInt64
+	err := queryer.QueryRow(`SELECT o.id, o.order_no, o.user_id, o.resource_id, r.title, o.amount_cents, o.service_fee_bps, o.service_fee_cents, o.creator_share_cents, o.seller_membership_tier_id, o.seller_membership_tier_name, o.status, o.gateway_trade_no, o.paid_at, o.created_at FROM commerce_orders o JOIN resources r ON r.id = o.resource_id WHERE o.id = ?`, id).Scan(&item.ID, &item.OrderNo, &item.UserID, &item.ResourceID, &item.ResourceTitle, &item.AmountCents, &item.ServiceFeeBPS, &item.ServiceFeeCents, &item.CreatorShareCents, &sellerTierID, &item.SellerMembershipTierName, &item.Status, &item.GatewayTradeNo, &paidAt, &item.CreatedAt)
+	if sellerTierID.Valid {
+		item.SellerMembershipTierID = sellerTierID.Int64
+	}
 	if paidAt.Valid {
 		item.PaidAt = &paidAt.Time
 	}
@@ -252,7 +268,7 @@ func getCommerceOrder(queryer rowQueryer, id int64) (domain.CommerceOrder, error
 }
 
 func (s *Store) ListCommerceOrders(userID int64) ([]domain.CommerceOrder, error) {
-	rows, err := s.db.Query(`SELECT o.id, o.order_no, o.user_id, o.resource_id, r.title, o.amount_cents, o.status, o.gateway_trade_no, o.paid_at, o.created_at FROM commerce_orders o JOIN resources r ON r.id = o.resource_id WHERE o.user_id = ? ORDER BY o.created_at DESC LIMIT 100`, userID)
+	rows, err := s.db.Query(`SELECT o.id, o.order_no, o.user_id, o.resource_id, r.title, o.amount_cents, o.service_fee_bps, o.service_fee_cents, o.creator_share_cents, o.seller_membership_tier_id, o.seller_membership_tier_name, o.status, o.gateway_trade_no, o.paid_at, o.created_at FROM commerce_orders o JOIN resources r ON r.id = o.resource_id WHERE o.user_id = ? ORDER BY o.created_at DESC LIMIT 100`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +277,12 @@ func (s *Store) ListCommerceOrders(userID int64) ([]domain.CommerceOrder, error)
 	for rows.Next() {
 		var item domain.CommerceOrder
 		var paidAt sql.NullTime
-		if err := rows.Scan(&item.ID, &item.OrderNo, &item.UserID, &item.ResourceID, &item.ResourceTitle, &item.AmountCents, &item.Status, &item.GatewayTradeNo, &paidAt, &item.CreatedAt); err != nil {
+		var sellerTierID sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.OrderNo, &item.UserID, &item.ResourceID, &item.ResourceTitle, &item.AmountCents, &item.ServiceFeeBPS, &item.ServiceFeeCents, &item.CreatorShareCents, &sellerTierID, &item.SellerMembershipTierName, &item.Status, &item.GatewayTradeNo, &paidAt, &item.CreatedAt); err != nil {
 			return nil, err
+		}
+		if sellerTierID.Valid {
+			item.SellerMembershipTierID = sellerTierID.Int64
 		}
 		if paidAt.Valid {
 			item.PaidAt = &paidAt.Time
@@ -282,13 +302,42 @@ func (s *Store) CompleteResourceOrder(orderNo, gatewayTradeNo string, amountCent
 	if err != nil {
 		return domain.CommerceOrder{}, false, err
 	}
+	defer tx.Rollback()
+	var resourceID int64
+	if err := tx.QueryRow(`SELECT resource_id FROM commerce_orders WHERE order_no = ?`, orderNo).Scan(&resourceID); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
+	var lockedResourceID int64
+	if err := tx.QueryRow(`SELECT id FROM resources WHERE id = ? FOR UPDATE`, resourceID).Scan(&lockedResourceID); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
 	var order domain.CommerceOrder
 	var creatorID int64
 	var paidAt sql.NullTime
-	defer tx.Rollback()
-	err = tx.QueryRow(`SELECT o.id, o.order_no, o.user_id, o.resource_id, r.title, o.amount_cents, o.status, o.gateway_trade_no, o.paid_at, o.created_at, r.creator_id FROM commerce_orders o JOIN resources r ON r.id = o.resource_id WHERE o.order_no = ? FOR UPDATE`, orderNo).Scan(&order.ID, &order.OrderNo, &order.UserID, &order.ResourceID, &order.ResourceTitle, &order.AmountCents, &order.Status, &order.GatewayTradeNo, &paidAt, &order.CreatedAt, &creatorID)
+	var sellerTierID sql.NullInt64
+	err = tx.QueryRow(`SELECT o.id, o.order_no, o.user_id, o.resource_id, r.title, o.amount_cents, o.service_fee_bps, o.service_fee_cents, o.creator_share_cents, o.seller_membership_tier_id, o.seller_membership_tier_name, o.status, o.gateway_trade_no, o.paid_at, o.created_at, r.creator_id FROM commerce_orders o JOIN resources r ON r.id = o.resource_id WHERE o.order_no = ? FOR UPDATE`, orderNo).Scan(&order.ID, &order.OrderNo, &order.UserID, &order.ResourceID, &order.ResourceTitle, &order.AmountCents, &order.ServiceFeeBPS, &order.ServiceFeeCents, &order.CreatorShareCents, &sellerTierID, &order.SellerMembershipTierName, &order.Status, &order.GatewayTradeNo, &paidAt, &order.CreatedAt, &creatorID)
 	if err != nil {
 		return domain.CommerceOrder{}, false, err
+	}
+	if sellerTierID.Valid {
+		order.SellerMembershipTierID = sellerTierID.Int64
+	}
+	if order.ServiceFeeBPS == 0 && order.ServiceFeeCents == 0 && order.CreatorShareCents == 0 {
+		policy, err := feePolicyWithQuery(tx, creatorID, false)
+		if err != nil {
+			return domain.CommerceOrder{}, false, err
+		}
+		order.ServiceFeeBPS = policy.ServiceFeeBPS
+		order.ServiceFeeCents = feeAmountCents(order.AmountCents, policy.ServiceFeeBPS)
+		order.CreatorShareCents = order.AmountCents - order.ServiceFeeCents
+		order.SellerMembershipTierID = policy.MembershipTierID
+		order.SellerMembershipTierName = policy.MembershipTierName
+		if _, err := tx.Exec(`UPDATE commerce_orders SET service_fee_bps = ?, service_fee_cents = ?, creator_share_cents = ?, seller_membership_tier_id = ?, seller_membership_tier_name = ? WHERE id = ?`, order.ServiceFeeBPS, order.ServiceFeeCents, order.CreatorShareCents, nullablePositiveID(order.SellerMembershipTierID), order.SellerMembershipTierName, order.ID); err != nil {
+			return domain.CommerceOrder{}, false, err
+		}
+	}
+	if order.ServiceFeeCents < 0 || order.CreatorShareCents < 0 || order.ServiceFeeCents+order.CreatorShareCents != order.AmountCents {
+		return domain.CommerceOrder{}, false, errors.New("order fee snapshot is invalid")
 	}
 	var duplicateOrderID int64
 	duplicateErr := tx.QueryRow(`SELECT id FROM commerce_orders WHERE gateway_trade_no = ? AND gateway_trade_no <> '' AND id <> ? LIMIT 1 FOR UPDATE`, gatewayTradeNo, order.ID).Scan(&duplicateOrderID)
@@ -301,12 +350,28 @@ func (s *Store) CompleteResourceOrder(orderNo, gatewayTradeNo string, amountCent
 	if paidAt.Valid {
 		order.PaidAt = &paidAt.Time
 	}
+	purchasedOrderID, purchaseErr := resourcePurchaseOrderForUpdate(tx, order.UserID, order.ResourceID)
+	if purchaseErr != nil && !errors.Is(purchaseErr, sql.ErrNoRows) {
+		return domain.CommerceOrder{}, false, purchaseErr
+	}
+	if purchaseErr == nil && purchasedOrderID != order.ID {
+		return s.completeDuplicateResourcePayment(tx, order, gatewayTradeNo, amountCents)
+	}
 	if order.Status == "paid" {
 		if amountCents != order.AmountCents || order.GatewayTradeNo != gatewayTradeNo {
 			return domain.CommerceOrder{}, false, errors.New("paid order callback does not match the original transaction")
 		}
 		if err := claimPaymentTransaction(tx, order.ID, gatewayTradeNo, amountCents); err != nil {
 			return domain.CommerceOrder{}, false, err
+		}
+		if purchaseErr != nil {
+			purchasedAt := time.Now().UTC()
+			if order.PaidAt != nil {
+				purchasedAt = *order.PaidAt
+			}
+			if err := createResourcePurchase(tx, order.UserID, order.ResourceID, order.ID, purchasedAt); err != nil {
+				return domain.CommerceOrder{}, false, err
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return domain.CommerceOrder{}, false, err
@@ -323,11 +388,16 @@ func (s *Store) CompleteResourceOrder(orderNo, gatewayTradeNo string, amountCent
 	if _, err := tx.Exec(`UPDATE commerce_orders SET status = 'paid', gateway_trade_no = ?, paid_at = ?, updated_at = ? WHERE id = ?`, gatewayTradeNo, now, now, order.ID); err != nil {
 		return domain.CommerceOrder{}, false, err
 	}
+	if err := createResourcePurchase(tx, order.UserID, order.ResourceID, order.ID, now); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
 	if _, err := tx.Exec(`UPDATE resources SET sales_count = sales_count + 1 WHERE id = ?`, order.ResourceID); err != nil {
 		return domain.CommerceOrder{}, false, err
 	}
-	creatorShare := order.AmountCents/100*90 + order.AmountCents%100*90/100
-	if _, err := tx.Exec(`INSERT INTO wallet_ledgers (user_id, entry_type, amount_cents, reference_type, reference_id, note, created_at) VALUES (?, 'resource_sale', ?, 'commerce_order', ?, ?, ?)`, creatorID, creatorShare, order.ID, fmt.Sprintf("资源销售收入，平台抽成 %d 分", order.AmountCents-creatorShare), now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO wallet_ledgers (user_id, entry_type, amount_cents, reference_type, reference_id, note, created_at) VALUES (?, 'resource_sale', ?, 'commerce_order', ?, ?, ?)`, creatorID, order.CreatorShareCents, order.ID, fmt.Sprintf("资源销售收入，服务费 %d 分（%.2f%%）", order.ServiceFeeCents, float64(order.ServiceFeeBPS)/100), now); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
+	if err := cancelOtherPendingResourceOrders(tx, order.UserID, order.ResourceID, order.ID, now); err != nil {
 		return domain.CommerceOrder{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -336,6 +406,65 @@ func (s *Store) CompleteResourceOrder(orderNo, gatewayTradeNo string, amountCent
 	order.Status = "paid"
 	order.GatewayTradeNo = gatewayTradeNo
 	order.PaidAt = &now
+	return order, false, nil
+}
+
+func resourcePurchaseOrderForUpdate(tx *sql.Tx, userID, resourceID int64) (int64, error) {
+	var orderID int64
+	err := tx.QueryRow(`SELECT order_id FROM resource_purchases WHERE user_id = ? AND resource_id = ? FOR UPDATE`, userID, resourceID).Scan(&orderID)
+	return orderID, err
+}
+
+func createResourcePurchase(tx *sql.Tx, userID, resourceID, orderID int64, purchasedAt time.Time) error {
+	if _, err := tx.Exec(`INSERT INTO resource_purchases (user_id, resource_id, order_id, purchased_at) VALUES (?, ?, ?, ?)`, userID, resourceID, orderID, purchasedAt); err != nil {
+		if isDuplicateKeyError(err) {
+			return errors.New("resource has already been purchased")
+		}
+		return err
+	}
+	return nil
+}
+
+func cancelOtherPendingResourceOrders(tx *sql.Tx, userID, resourceID, completedOrderID int64, now time.Time) error {
+	_, err := tx.Exec(`UPDATE commerce_orders SET status = 'cancelled', updated_at = ? WHERE user_id = ? AND resource_id = ? AND id <> ? AND status = 'pending'`, now, userID, resourceID, completedOrderID)
+	return err
+}
+
+func (s *Store) completeDuplicateResourcePayment(tx *sql.Tx, order domain.CommerceOrder, gatewayTradeNo string, amountCents int64) (domain.CommerceOrder, bool, error) {
+	if amountCents != order.AmountCents {
+		return domain.CommerceOrder{}, false, errors.New("duplicate payment amount does not match the order")
+	}
+	if order.Status == "duplicate_refunded" {
+		if order.GatewayTradeNo != gatewayTradeNo {
+			return domain.CommerceOrder{}, false, errors.New("duplicate payment callback does not match the original transaction")
+		}
+		if err := claimPaymentTransaction(tx, order.ID, gatewayTradeNo, amountCents); err != nil {
+			return domain.CommerceOrder{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.CommerceOrder{}, false, err
+		}
+		return order, true, nil
+	}
+	if order.Status != "pending" && order.Status != "cancelled" {
+		return domain.CommerceOrder{}, false, errors.New("duplicate payment order is not eligible for refund")
+	}
+	if err := claimPaymentTransaction(tx, order.ID, gatewayTradeNo, amountCents); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
+	now := time.Now().UTC()
+	if _, err := tx.Exec(`UPDATE commerce_orders SET status = 'duplicate_refunded', gateway_trade_no = ?, paid_at = ?, updated_at = ? WHERE id = ?`, gatewayTradeNo, now, now, order.ID); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
+	if _, err := tx.Exec(`INSERT INTO wallet_ledgers (user_id, entry_type, amount_cents, reference_type, reference_id, note, created_at) VALUES (?, 'resource_duplicate_refund', ?, 'commerce_order', ?, ?, ?)`, order.UserID, order.AmountCents, order.ID, "重复资源支付自动退回余额", now); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
+	order.Status = "duplicate_refunded"
+	order.GatewayTradeNo = gatewayTradeNo
+	order.PaidAt = &now
+	if err := tx.Commit(); err != nil {
+		return domain.CommerceOrder{}, false, err
+	}
 	return order, false, nil
 }
 
@@ -370,7 +499,7 @@ func claimPaymentTransaction(tx *sql.Tx, orderID int64, gatewayTradeNo string, a
 
 func (s *Store) HasPurchasedResource(userID, resourceID int64) (bool, error) {
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM commerce_orders WHERE user_id = ? AND resource_id = ? AND status = 'paid'`, userID, resourceID).Scan(&count); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM resource_purchases WHERE user_id = ? AND resource_id = ?`, userID, resourceID).Scan(&count); err != nil {
 		return false, err
 	}
 	return count > 0, nil
@@ -378,7 +507,7 @@ func (s *Store) HasPurchasedResource(userID, resourceID int64) (bool, error) {
 
 func (s *Store) CreatorBalance(userID int64) (int64, error) {
 	var earned sql.NullInt64
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount_cents), 0) FROM wallet_ledgers WHERE user_id = ?`, userID).Scan(&earned); err != nil {
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount_cents), 0) FROM wallet_ledgers WHERE user_id = ? AND entry_type = 'resource_sale'`, userID).Scan(&earned); err != nil {
 		return 0, err
 	}
 	var reserved sql.NullInt64
@@ -415,8 +544,17 @@ func (s *Store) CreateCreatorPayout(userID, amountCents int64, method, account, 
 	if err := tx.QueryRow(`SELECT id FROM users WHERE id = ? AND status = 'active' FOR UPDATE`, userID).Scan(&lockedID); err != nil {
 		return domain.CreatorPayout{}, err
 	}
+	feePolicy, err := feePolicyWithQuery(tx, userID, true)
+	if err != nil {
+		return domain.CreatorPayout{}, err
+	}
+	withdrawalFeeCents := feeAmountCents(amountCents, feePolicy.WithdrawalFeeBPS)
+	netAmountCents := amountCents - withdrawalFeeCents
+	if netAmountCents <= 0 {
+		return domain.CreatorPayout{}, errors.New("提现手续费不能等于或超过提现金额")
+	}
 	var earned, reserved int64
-	if err := tx.QueryRow(`SELECT COALESCE(SUM(amount_cents), 0) FROM wallet_ledgers WHERE user_id = ?`, userID).Scan(&earned); err != nil {
+	if err := tx.QueryRow(`SELECT COALESCE(SUM(amount_cents), 0) FROM wallet_ledgers WHERE user_id = ? AND entry_type = 'resource_sale'`, userID).Scan(&earned); err != nil {
 		return domain.CreatorPayout{}, err
 	}
 	if err := tx.QueryRow(`SELECT COALESCE(SUM(amount_cents), 0) FROM creator_payouts WHERE creator_id = ? AND status IN ('pending', 'paid')`, userID).Scan(&reserved); err != nil {
@@ -426,7 +564,7 @@ func (s *Store) CreateCreatorPayout(userID, amountCents int64, method, account, 
 		return domain.CreatorPayout{}, errors.New("insufficient creator balance")
 	}
 	now := time.Now().UTC()
-	result, err := tx.Exec(`INSERT INTO creator_payouts (creator_id, amount_cents, status, payout_method, payout_account, account_name, note, review_note, created_at, updated_at) VALUES (?, ?, 'pending', ?, ?, ?, ?, '', ?, ?)`, userID, amountCents, method, account, accountName, note, now, now)
+	result, err := tx.Exec(`INSERT INTO creator_payouts (creator_id, amount_cents, withdrawal_fee_bps, withdrawal_fee_cents, net_amount_cents, membership_tier_id, membership_tier_name, status, payout_method, payout_account, account_name, note, review_note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '', ?, ?)`, userID, amountCents, feePolicy.WithdrawalFeeBPS, withdrawalFeeCents, netAmountCents, nullablePositiveID(feePolicy.MembershipTierID), feePolicy.MembershipTierName, method, account, accountName, note, now, now)
 	if err != nil {
 		return domain.CreatorPayout{}, err
 	}
@@ -464,7 +602,7 @@ func (s *Store) ListAdminCreatorPayouts(status string) ([]domain.CreatorPayout, 
 }
 
 func (s *Store) listCreatorPayouts(where string, args ...any) ([]domain.CreatorPayout, error) {
-	query := `SELECT p.id, p.creator_id, u.display_name, u.email, p.amount_cents, p.status, p.payout_method, p.payout_account, p.account_name, p.note, p.review_note, p.reviewed_by, p.reviewed_at, p.created_at, p.updated_at FROM creator_payouts p JOIN users u ON u.id = p.creator_id ` + where + ` ORDER BY p.created_at DESC LIMIT 100`
+	query := `SELECT p.id, p.creator_id, u.display_name, u.email, p.amount_cents, p.withdrawal_fee_bps, p.withdrawal_fee_cents, p.net_amount_cents, p.membership_tier_id, p.membership_tier_name, p.status, p.payout_method, p.payout_account, p.account_name, p.note, p.review_note, p.reviewed_by, p.reviewed_at, p.created_at, p.updated_at FROM creator_payouts p JOIN users u ON u.id = p.creator_id ` + where + ` ORDER BY p.created_at DESC LIMIT 100`
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -486,7 +624,7 @@ func (s *Store) getCreatorPayout(where string, args ...any) (domain.CreatorPayou
 }
 
 func getCreatorPayoutWithQuery(queryer rowQueryer, where string, args ...any) (domain.CreatorPayout, error) {
-	row := queryer.QueryRow(`SELECT p.id, p.creator_id, u.display_name, u.email, p.amount_cents, p.status, p.payout_method, p.payout_account, p.account_name, p.note, p.review_note, p.reviewed_by, p.reviewed_at, p.created_at, p.updated_at FROM creator_payouts p JOIN users u ON u.id = p.creator_id `+where, args...)
+	row := queryer.QueryRow(`SELECT p.id, p.creator_id, u.display_name, u.email, p.amount_cents, p.withdrawal_fee_bps, p.withdrawal_fee_cents, p.net_amount_cents, p.membership_tier_id, p.membership_tier_name, p.status, p.payout_method, p.payout_account, p.account_name, p.note, p.review_note, p.reviewed_by, p.reviewed_at, p.created_at, p.updated_at FROM creator_payouts p JOIN users u ON u.id = p.creator_id `+where, args...)
 	return scanCreatorPayout(row)
 }
 
@@ -494,10 +632,17 @@ type creatorPayoutScanner interface{ Scan(...any) error }
 
 func scanCreatorPayout(scanner creatorPayoutScanner) (domain.CreatorPayout, error) {
 	var item domain.CreatorPayout
+	var tierID sql.NullInt64
 	var reviewedBy sql.NullInt64
 	var reviewedAt sql.NullTime
-	if err := scanner.Scan(&item.ID, &item.CreatorID, &item.CreatorName, &item.CreatorEmail, &item.AmountCents, &item.Status, &item.PayoutMethod, &item.PayoutAccount, &item.AccountName, &item.Note, &item.ReviewNote, &reviewedBy, &reviewedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.CreatorID, &item.CreatorName, &item.CreatorEmail, &item.AmountCents, &item.WithdrawalFeeBPS, &item.WithdrawalFeeCents, &item.NetAmountCents, &tierID, &item.MembershipTierName, &item.Status, &item.PayoutMethod, &item.PayoutAccount, &item.AccountName, &item.Note, &item.ReviewNote, &reviewedBy, &reviewedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
+	}
+	if tierID.Valid {
+		item.MembershipTierID = tierID.Int64
+	}
+	if item.NetAmountCents == 0 && item.AmountCents > 0 && item.WithdrawalFeeCents == 0 {
+		item.NetAmountCents = item.AmountCents
 	}
 	if reviewedBy.Valid {
 		item.ReviewedBy = &reviewedBy.Int64

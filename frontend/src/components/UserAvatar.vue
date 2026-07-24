@@ -30,7 +30,12 @@ const style = computed(() => ({
   display: inline-grid;
   width: var(--rf-avatar-size);
   height: var(--rf-avatar-size);
+  min-width: var(--rf-avatar-size);
+  min-height: var(--rf-avatar-size);
+  max-width: var(--rf-avatar-size);
+  max-height: var(--rf-avatar-size);
   flex: 0 0 var(--rf-avatar-size);
+  aspect-ratio: 1 / 1;
   place-items: center;
   overflow: hidden;
   border-radius: 50%;
@@ -40,8 +45,10 @@ const style = computed(() => ({
   vertical-align: middle;
 }
 .rf-user-avatar img {
+  display: block;
   width: 100%;
   height: 100%;
+  aspect-ratio: 1 / 1;
   object-fit: cover;
 }
 .rf-user-avatar :deep(svg) {

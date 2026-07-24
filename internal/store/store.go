@@ -110,6 +110,19 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 	}
+	// Backfill the immutable purchase ledger before any request can rely on it.
+	// Historical duplicate paid orders intentionally map to the earliest order only.
+	if _, err := s.db.Exec(`INSERT IGNORE INTO resource_purchases (user_id, resource_id, order_id, purchased_at)
+		SELECT o.user_id, o.resource_id, o.id, COALESCE(o.paid_at, o.updated_at, o.created_at)
+		FROM commerce_orders o
+		JOIN (
+			SELECT user_id, resource_id, MIN(id) AS order_id
+			FROM commerce_orders
+			WHERE status = 'paid'
+			GROUP BY user_id, resource_id
+		) first_paid ON first_paid.order_id = o.id`); err != nil {
+		return fmt.Errorf("resource purchase backfill failed: %w", err)
+	}
 	for _, column := range []struct {
 		table string
 		name  string
@@ -119,11 +132,29 @@ func (s *Store) migrate() error {
 		{table: "resources", name: "sales_count", def: "BIGINT NOT NULL DEFAULT 0"},
 		{table: "users", name: "bio", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "users", name: "cover_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
+		{table: "users", name: "profile_status", def: "VARCHAR(24) NOT NULL DEFAULT 'active'"},
 		{table: "users", name: "blue_verified", def: "TINYINT(1) NOT NULL DEFAULT 0"},
 		{table: "users", name: "verification_label", def: "VARCHAR(80) NOT NULL DEFAULT ''"},
+		{table: "users", name: "membership_tier_id", def: "BIGINT NULL"},
+		{table: "users", name: "membership_started_at", def: "DATETIME(6) NULL"},
+		{table: "users", name: "membership_expires_at", def: "DATETIME(6) NULL"},
+		{table: "membership_settings", name: "default_withdrawal_fee_bps", def: "INT NOT NULL DEFAULT 300"},
+		{table: "membership_settings", name: "default_service_fee_bps", def: "INT NOT NULL DEFAULT 500"},
+		{table: "membership_orders", name: "membership_tier_id", def: "BIGINT NULL"},
+		{table: "membership_orders", name: "tier_name", def: "VARCHAR(80) NOT NULL DEFAULT ''"},
+		{table: "commerce_orders", name: "service_fee_bps", def: "INT NOT NULL DEFAULT 0"},
+		{table: "commerce_orders", name: "service_fee_cents", def: "BIGINT NOT NULL DEFAULT 0"},
+		{table: "commerce_orders", name: "creator_share_cents", def: "BIGINT NOT NULL DEFAULT 0"},
+		{table: "commerce_orders", name: "seller_membership_tier_id", def: "BIGINT NULL"},
+		{table: "commerce_orders", name: "seller_membership_tier_name", def: "VARCHAR(80) NOT NULL DEFAULT ''"},
 		{table: "creator_payouts", name: "payout_method", def: "VARCHAR(32) NOT NULL DEFAULT 'alipay'"},
 		{table: "creator_payouts", name: "payout_account", def: "VARCHAR(255) NOT NULL DEFAULT ''"},
 		{table: "creator_payouts", name: "account_name", def: "VARCHAR(120) NOT NULL DEFAULT ''"},
+		{table: "creator_payouts", name: "withdrawal_fee_bps", def: "INT NOT NULL DEFAULT 0"},
+		{table: "creator_payouts", name: "withdrawal_fee_cents", def: "BIGINT NOT NULL DEFAULT 0"},
+		{table: "creator_payouts", name: "net_amount_cents", def: "BIGINT NOT NULL DEFAULT 0"},
+		{table: "creator_payouts", name: "membership_tier_id", def: "BIGINT NULL"},
+		{table: "creator_payouts", name: "membership_tier_name", def: "VARCHAR(80) NOT NULL DEFAULT ''"},
 		{table: "creator_payouts", name: "review_note", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "creator_payouts", name: "reviewed_by", def: "BIGINT NULL"},
 		{table: "creator_payouts", name: "reviewed_at", def: "DATETIME(6) NULL"},
@@ -132,6 +163,11 @@ func (s *Store) migrate() error {
 		{table: "site_settings", name: "banner_link", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "site_settings", name: "verification_badge_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "site_settings", name: "post_review_required", def: "TINYINT(1) NOT NULL DEFAULT 1"},
+		{table: "conversation_members", name: "membership_status", def: "VARCHAR(16) NOT NULL DEFAULT 'accepted'"},
+		{table: "conversation_members", name: "invited_by", def: "BIGINT NULL"},
+		{table: "conversation_members", name: "responded_at", def: "DATETIME(6) NULL"},
+		{table: "conversation_members", name: "last_notified_at", def: "DATETIME(6) NULL"},
+		{table: "notifications", name: "conversation_id", def: "BIGINT NULL"},
 	} {
 		if err := s.ensureColumn(column.table, column.name, column.def); err != nil {
 			return fmt.Errorf("migration column %s.%s failed: %w", column.table, column.name, err)
@@ -148,13 +184,23 @@ func (s *Store) migrate() error {
 		{table: "email_verifications", name: "idx_email_verifications_expires", def: "INDEX idx_email_verifications_expires (expires_at)"},
 		{table: "comments", name: "idx_comments_author", def: "INDEX idx_comments_author (author_id, status, post_id)"},
 		{table: "users", name: "idx_users_status_created", def: "INDEX idx_users_status_created (status, created_at)"},
+		{table: "users", name: "idx_users_profile_status_created", def: "INDEX idx_users_profile_status_created (profile_status, created_at)"},
 		{table: "posts", name: "idx_posts_status_updated", def: "INDEX idx_posts_status_updated (status, updated_at)"},
 		{table: "resources", name: "idx_resources_creator_status", def: "INDEX idx_resources_creator_status (creator_id, status, updated_at)"},
 		{table: "commerce_orders", name: "idx_orders_user_resource_status", def: "INDEX idx_orders_user_resource_status (user_id, resource_id, status, created_at)"},
+		{table: "conversation_members", name: "idx_conversation_members_user_status", def: "INDEX idx_conversation_members_user_status (user_id, membership_status, conversation_id)"},
+		{table: "conversations", name: "idx_conversations_creator_kind_created", def: "INDEX idx_conversations_creator_kind_created (created_by, kind, created_at)"},
+		{table: "notifications", name: "idx_notifications_conversation", def: "INDEX idx_notifications_conversation (conversation_id, created_at)"},
+		{table: "users", name: "idx_users_membership_expires", def: "INDEX idx_users_membership_expires (membership_expires_at, status)"},
+		{table: "users", name: "idx_users_membership_tier", def: "INDEX idx_users_membership_tier (membership_tier_id, membership_expires_at)"},
+		{table: "membership_tiers", name: "idx_membership_tiers_enabled_sort", def: "INDEX idx_membership_tiers_enabled_sort (enabled, sort_order, id)"},
 	} {
 		if err := s.ensureIndex(index.table, index.name, index.def); err != nil {
 			return fmt.Errorf("migration index %s.%s failed: %w", index.table, index.name, err)
 		}
+	}
+	if _, err := s.db.Exec(`UPDATE creator_payouts SET net_amount_cents = amount_cents WHERE amount_cents > 0 AND net_amount_cents = 0 AND withdrawal_fee_cents = 0`); err != nil {
+		return fmt.Errorf("creator payout fee backfill failed: %w", err)
 	}
 	return nil
 }
@@ -214,6 +260,12 @@ func (s *Store) ensureDefaults(adminEmail, adminPassword string) error {
 		return err
 	}
 	if err := s.ensureSingleRow(`oauth_settings`, `INSERT INTO oauth_settings (id, enabled, provider_key, provider_name, client_id, client_secret_ciphertext, authorization_url, token_url, userinfo_url, scopes, token_auth_method, require_verified_email, updated_at) VALUES (1, 0, 'oidc', 'OAuth', '', '', '', '', '', 'openid email profile', 'client_secret_post', 1, ?)`, now); err != nil {
+		return err
+	}
+	if err := s.ensureSingleRow(`membership_settings`, `INSERT INTO membership_settings (id, enabled, name, badge_label, badge_url, badge_color, monthly_price_cents, quarterly_price_cents, yearly_price_cents, post_review_exempt, updated_at) VALUES (1, 0, '社区会员', '会员', '', '#f59e0b', 0, 0, 0, 0, ?)`, now); err != nil {
+		return err
+	}
+	if err := s.ensureMembershipTierDefaults(now); err != nil {
 		return err
 	}
 	boards := []struct{ slug, name, description, icon string }{
@@ -315,7 +367,7 @@ func (s *Store) cleanupExpiredAuthData(now time.Time) error {
 func (s *Store) reconcileDerivedData() error {
 	statements := []string{
 		`UPDATE posts p LEFT JOIN (SELECT post_id, COUNT(*) AS total FROM comments WHERE status = 'published' GROUP BY post_id) c ON c.post_id = p.id SET p.comment_count = COALESCE(c.total, 0) WHERE p.comment_count <> COALESCE(c.total, 0)`,
-		`UPDATE resources r LEFT JOIN (SELECT resource_id, COUNT(*) AS total FROM commerce_orders WHERE status = 'paid' GROUP BY resource_id) o ON o.resource_id = r.id SET r.sales_count = COALESCE(o.total, 0) WHERE r.sales_count <> COALESCE(o.total, 0)`,
+		`UPDATE resources r LEFT JOIN (SELECT resource_id, COUNT(*) AS total FROM resource_purchases GROUP BY resource_id) o ON o.resource_id = r.id SET r.sales_count = COALESCE(o.total, 0) WHERE r.sales_count <> COALESCE(o.total, 0)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.Exec(statement); err != nil {
@@ -794,9 +846,12 @@ func (s *Store) GetUser(id int64) (domain.User, error) {
 func getUser(queryer rowQueryer, id int64) (domain.User, error) {
 	var user domain.User
 	var blueVerified, robloxVerified int
-	err := queryer.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE id = ?`, id).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	var membershipTierID sql.NullInt64
+	var membershipStartedAt, membershipExpiresAt sql.NullTime
+	err := queryer.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE id = ?`, id).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
+	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
 	return user, err
 }
 
@@ -813,9 +868,12 @@ func isMigrationAlreadyApplied(err error) bool {
 func (s *Store) GetUserByEmail(email string) (domain.User, error) {
 	var user domain.User
 	var blueVerified, robloxVerified int
-	err := s.db.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	var membershipTierID sql.NullInt64
+	var membershipStartedAt, membershipExpiresAt sql.NullTime
+	err := s.db.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
+	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
 	return user, err
 }
 
@@ -823,7 +881,9 @@ func (s *Store) VerifyPassword(email, password string) (domain.User, error) {
 	var user domain.User
 	var hash string
 	var blueVerified, robloxVerified int
-	queryErr := s.db.QueryRow(`SELECT id, email, password_hash, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &hash, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	var membershipTierID sql.NullInt64
+	var membershipStartedAt, membershipExpiresAt sql.NullTime
+	queryErr := s.db.QueryRow(`SELECT id, email, password_hash, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &hash, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	passwordHash := dummyPasswordHash
 	if queryErr == nil {
 		passwordHash = []byte(hash)
@@ -841,6 +901,7 @@ func (s *Store) VerifyPassword(email, password string) (domain.User, error) {
 	}
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
+	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
 	return user, nil
 }
 
@@ -867,12 +928,15 @@ func (s *Store) UserBySession(token string) (domain.User, error) {
 	hash := sha256.Sum256([]byte(token))
 	var user domain.User
 	var blueVerified, robloxVerified int
-	err := s.db.QueryRow(`SELECT u.id, u.email, u.display_name, u.avatar_url, u.cover_url, u.bio, u.role, u.status, u.blue_verified, u.verification_label, u.roblox_name, u.roblox_id, u.roblox_verified, u.created_at FROM auth_sessions a JOIN users u ON u.id = a.user_id WHERE a.token_hash = ? AND a.expires_at > ? AND u.status = 'active'`, hash[:], time.Now().UTC()).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	var membershipTierID sql.NullInt64
+	var membershipStartedAt, membershipExpiresAt sql.NullTime
+	err := s.db.QueryRow(`SELECT u.id, u.email, u.display_name, u.avatar_url, u.cover_url, u.bio, u.role, u.status, u.blue_verified, u.verification_label, u.membership_tier_id, u.membership_started_at, u.membership_expires_at, u.roblox_name, u.roblox_id, u.roblox_verified, u.created_at FROM auth_sessions a JOIN users u ON u.id = a.user_id WHERE a.token_hash = ? AND a.expires_at > ? AND u.status = 'active'`, hash[:], time.Now().UTC()).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	if err != nil {
 		return domain.User{}, errors.New("session expired")
 	}
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
+	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
 	return user, nil
 }
 
@@ -896,7 +960,9 @@ func (s *Store) CreateResetToken(email string) (string, domain.User, error) {
 	defer tx.Rollback()
 	var user domain.User
 	var blueVerified, robloxVerified int
-	if err := tx.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ? FOR UPDATE`, email).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt); err != nil {
+	var membershipTierID sql.NullInt64
+	var membershipStartedAt, membershipExpiresAt sql.NullTime
+	if err := tx.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ? FOR UPDATE`, email).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt); err != nil {
 		return "", domain.User{}, err
 	}
 	if user.Status != "active" {
@@ -904,6 +970,7 @@ func (s *Store) CreateResetToken(email string) (string, domain.User, error) {
 	}
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
+	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
 	var lastCreated time.Time
 	if err := tx.QueryRow(`SELECT created_at FROM password_resets WHERE user_id = ? ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, user.ID).Scan(&lastCreated); err == nil {
 		if now.Before(lastCreated.Add(time.Minute)) {
@@ -1116,8 +1183,44 @@ func (s *Store) ListBoards() ([]domain.Board, error) {
 }
 
 func (s *Store) ListPosts(boardSlug, query string, limit int) ([]domain.Post, error) {
+	return s.listPosts(boardSlug, query, "", limit, false)
+}
+
+func (s *Store) ListPostsPage(boardSlug, query string, limit, offset int) (domain.PostPage, error) {
+	return s.listPostsPage(boardSlug, query, "", limit, offset, false)
+}
+
+// ListRecommendedPosts and ListRecommendedPostsPage intentionally have no
+// board/category filter.  Keeping this as a separate store contract prevents
+// the home timeline from accidentally inheriting a board filter when the
+// caller is navigating between a board page and the home page.
+func (s *Store) ListRecommendedPosts(limit int) ([]domain.Post, error) {
+	return s.listPosts("", "", "", limit, true)
+}
+
+func (s *Store) ListRecommendedPostsPage(limit, offset int) (domain.PostPage, error) {
+	return s.listPostsPage("", "", "", limit, offset, true)
+}
+
+func (s *Store) SearchPosts(query, category string, limit int) ([]domain.Post, error) {
+	return s.listPosts("", query, category, limit, false)
+}
+
+func (s *Store) listPosts(boardSlug, query, category string, limit int, prioritizeMembers bool) ([]domain.Post, error) {
+	page, err := s.listPostsPage(boardSlug, query, category, limit, 0, prioritizeMembers)
+	return page.Items, err
+}
+
+func (s *Store) listPostsPage(boardSlug, query, category string, limit, offset int, prioritizeMembers bool) (domain.PostPage, error) {
+	boardSlug = strings.TrimSpace(boardSlug)
+	if strings.EqualFold(boardSlug, "all") {
+		boardSlug = ""
+	}
 	if limit < 1 || limit > 100 {
 		limit = 20
+	}
+	if offset < 0 || offset > 100000 {
+		offset = 0
 	}
 	args := []any{}
 	where := `p.status = 'published' AND b.status = 'active' AND u.status = 'active'`
@@ -1125,40 +1228,61 @@ func (s *Store) ListPosts(boardSlug, query string, limit int) ([]domain.Post, er
 		where += ` AND b.slug = ?`
 		args = append(args, boardSlug)
 	}
+	switch category {
+	case "":
+	case "posts":
+		where += ` AND p.post_type <> 'guide' AND b.slug <> 'guides'`
+	case "guides":
+		where += ` AND (p.post_type = 'guide' OR b.slug = 'guides')`
+	default:
+		return domain.PostPage{}, errors.New("post search category is invalid")
+	}
 	query = strings.TrimSpace(query)
 	if len([]rune(query)) > 100 {
-		return nil, errors.New("search query is too long")
+		return domain.PostPage{}, errors.New("search query is too long")
 	}
 	if query != "" {
 		where += ` AND (p.title LIKE ? ESCAPE '\\' OR p.content LIKE ? ESCAPE '\\')`
 		pattern := "%" + escapeLike(query) + "%"
 		args = append(args, pattern, pattern)
 	}
-	args = append(args, limit)
-	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE `+where+` ORDER BY p.pinned DESC, p.featured DESC, p.updated_at DESC LIMIT ?`, args...)
+	args = append(args, limit+1, offset)
+	orderBy := `p.pinned DESC, p.featured DESC, p.updated_at DESC, p.id DESC`
+	if prioritizeMembers {
+		// A priority tier receives a six-hour recency boost instead of a
+		// permanent top bucket, so paid posts cannot starve newer community
+		// content indefinitely.
+		orderBy = `p.pinned DESC, p.featured DESC, (UNIX_TIMESTAMP(p.updated_at) + CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() AND mt.feed_priority = 1 THEN 21600 ELSE 0 END) DESC, p.id DESC`
+	}
+	rows, err := s.db.Query(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id LEFT JOIN membership_tiers mt ON mt.id = u.membership_tier_id WHERE `+where+` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
-		return nil, err
+		return domain.PostPage{}, err
 	}
 	defer rows.Close()
-	result := make([]domain.Post, 0)
+	result := make([]domain.Post, 0, limit+1)
 	for rows.Next() {
 		var item domain.Post
-		var authorVerified, pinned, featured int
-		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
+		var authorVerified, authorMember, pinned, featured int
+		if err := rows.Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return domain.PostPage{}, err
 		}
 		item.AuthorVerified = authorVerified != 0
+		item.AuthorMember = authorMember != 0
 		item.Pinned = pinned != 0
 		item.Featured = featured != 0
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return domain.PostPage{}, err
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
 	}
 	if err := attachPostMedia(s.db, result); err != nil {
-		return nil, err
+		return domain.PostPage{}, err
 	}
-	return result, nil
+	return domain.PostPage{Items: result, NextOffset: offset + len(result), HasMore: hasMore}, nil
 }
 
 func (s *Store) GetPost(id int64) (domain.Post, error) {
@@ -1194,9 +1318,10 @@ func (s *Store) GetPost(id int64) (domain.Post, error) {
 func getPost(queryer rowQueryer, id int64) (domain.Post, error) {
 	var item domain.Post
 	var pinned, featured int
-	var authorVerified int
-	err := queryer.QueryRow(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active'`, id).Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt)
+	var authorVerified, authorMember int
+	err := queryer.QueryRow(`SELECT p.id, p.board_id, b.name, p.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, p.title, p.content, p.post_type, p.status, p.pinned, p.featured, p.views, p.comment_count, (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id), (SELECT COUNT(*) FROM post_reposts pr WHERE pr.post_id = p.id), p.created_at, p.updated_at FROM posts p JOIN boards b ON b.id = p.board_id JOIN users u ON u.id = p.author_id WHERE p.id = ? AND p.status = 'published' AND b.status = 'active' AND u.status = 'active'`, id).Scan(&item.ID, &item.BoardID, &item.BoardName, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Title, &item.Content, &item.PostType, &item.Status, &pinned, &featured, &item.Views, &item.CommentCount, &item.LikeCount, &item.RepostCount, &item.CreatedAt, &item.UpdatedAt)
 	item.AuthorVerified = authorVerified != 0
+	item.AuthorMember = authorMember != 0
 	item.Pinned = pinned != 0
 	item.Featured = featured != 0
 	return item, err
@@ -1225,7 +1350,9 @@ func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content, postT
 	}
 	defer tx.Rollback()
 	var authorStatus, authorRole string
-	if err := tx.QueryRow(`SELECT status, role FROM users WHERE id = ? FOR UPDATE`, userID).Scan(&authorStatus, &authorRole); err != nil || authorStatus != "active" {
+	var membershipTierID sql.NullInt64
+	var membershipExpiresAt sql.NullTime
+	if err := tx.QueryRow(`SELECT status, role, membership_tier_id, membership_expires_at FROM users WHERE id = ? FOR UPDATE`, userID).Scan(&authorStatus, &authorRole, &membershipTierID, &membershipExpiresAt); err != nil || authorStatus != "active" {
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return domain.Post{}, err
 		}
@@ -1235,7 +1362,15 @@ func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content, postT
 	if err := tx.QueryRow(`SELECT post_review_required FROM site_settings WHERE id = 1`).Scan(&reviewRequired); err != nil {
 		return domain.Post{}, err
 	}
-	postStatus := initialPostStatus(reviewRequired != 0, authorRole)
+	memberExempt := false
+	if membershipTierID.Valid && membershipExpiresAt.Valid && membershipExpiresAt.Time.After(time.Now().UTC()) {
+		tier, err := getMembershipTier(tx, membershipTierID.Int64, false)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return domain.Post{}, err
+		}
+		memberExempt = err == nil && tier.PostReviewExempt
+	}
+	postStatus := initialPostStatus(reviewRequired != 0, authorRole, memberExempt)
 	var boardName string
 	if err := tx.QueryRow(`SELECT name FROM boards WHERE id = ? AND status = 'active' FOR UPDATE`, boardID).Scan(&boardName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1269,15 +1404,16 @@ func (s *Store) CreatePostWithMedia(userID, boardID int64, title, content, postT
 	return item, nil
 }
 
-func initialPostStatus(reviewRequired bool, authorRole string) string {
-	if reviewRequired && authorRole != "admin" {
+func initialPostStatus(reviewRequired bool, authorRole string, membershipExempt ...bool) string {
+	exempt := len(membershipExempt) > 0 && membershipExempt[0]
+	if reviewRequired && authorRole != "admin" && !exempt {
 		return "pending"
 	}
 	return "published"
 }
 
 func (s *Store) ListComments(postID int64) ([]domain.Comment, error) {
-	rows, err := s.db.Query(`SELECT c.id, c.post_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.post_id = ? AND c.status = 'published' AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND pu.status = 'active' ORDER BY c.created_at ASC LIMIT 200`, postID)
+	rows, err := s.db.Query(`SELECT c.id, c.post_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.post_id = ? AND c.status = 'published' AND p.status = 'published' AND b.status = 'active' AND u.status = 'active' AND pu.status = 'active' ORDER BY c.created_at ASC LIMIT 200`, postID)
 	if err != nil {
 		return nil, err
 	}
@@ -1285,22 +1421,30 @@ func (s *Store) ListComments(postID int64) ([]domain.Comment, error) {
 	result := make([]domain.Comment, 0)
 	for rows.Next() {
 		var item domain.Comment
-		var authorVerified int
-		if err := rows.Scan(&item.ID, &item.PostID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &item.Content, &item.LikeCount, &item.CreatedAt); err != nil {
+		var authorVerified, authorMember int
+		if err := rows.Scan(&item.ID, &item.PostID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Content, &item.LikeCount, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		item.AuthorVerified = authorVerified != 0
+		item.AuthorMember = authorMember != 0
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := attachCommentMedia(s.db, result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
 func (s *Store) CreateComment(userID, postID int64, content string) (domain.Comment, error) {
+	return s.CreateCommentWithMedia(userID, postID, content, nil)
+}
+
+func (s *Store) CreateCommentWithMedia(userID, postID int64, content string, media []CommentMediaInput) (domain.Comment, error) {
 	content = strings.TrimSpace(content)
-	if content == "" || len([]rune(content)) > 5000 || containsControl(content) {
+	if (content == "" && len(media) == 0) || len([]rune(content)) > 5000 || containsControl(content) || len(media) > maxCommentMediaCount {
 		return domain.Comment{}, ErrCommentInvalid
 	}
 	tx, err := s.db.Begin()
@@ -1328,6 +1472,9 @@ func (s *Store) CreateComment(userID, postID int64, content string) (domain.Comm
 	if err != nil {
 		return domain.Comment{}, err
 	}
+	if err := insertCommentMedia(tx, id, media, now); err != nil {
+		return domain.Comment{}, err
+	}
 	update, err := tx.Exec(`UPDATE posts SET comment_count = comment_count + 1, updated_at = ? WHERE id = ?`, now, postID)
 	if err != nil {
 		return domain.Comment{}, err
@@ -1351,10 +1498,14 @@ func (s *Store) CreateComment(userID, postID int64, content string) (domain.Comm
 	return item, nil
 }
 
-func getComment(queryer rowQueryer, id int64) (domain.Comment, error) {
+func getComment(queryer sqlQueryer, id int64) (domain.Comment, error) {
 	var item domain.Comment
-	var authorVerified int
-	err := queryer.QueryRow(`SELECT c.id, c.post_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.id = ? AND c.status = 'published' AND u.status = 'active' AND p.status = 'published' AND b.status = 'active' AND pu.status = 'active'`, id).Scan(&item.ID, &item.PostID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &item.Content, &item.LikeCount, &item.CreatedAt)
+	var authorVerified, authorMember int
+	err := queryer.QueryRow(`SELECT c.id, c.post_id, c.author_id, u.display_name, u.avatar_url, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END, c.content, (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id), c.created_at FROM comments c JOIN users u ON u.id = c.author_id JOIN posts p ON p.id = c.post_id JOIN boards b ON b.id = p.board_id JOIN users pu ON pu.id = p.author_id WHERE c.id = ? AND c.status = 'published' AND u.status = 'active' AND p.status = 'published' AND b.status = 'active' AND pu.status = 'active'`, id).Scan(&item.ID, &item.PostID, &item.AuthorID, &item.AuthorName, &item.AuthorAvatar, &authorVerified, &item.AuthorVerificationLabel, &authorMember, &item.AuthorMembershipTierID, &item.Content, &item.LikeCount, &item.CreatedAt)
 	item.AuthorVerified = authorVerified != 0
+	item.AuthorMember = authorMember != 0
+	if err == nil {
+		item.Media, err = getCommentMedia(queryer, id)
+	}
 	return item, err
 }

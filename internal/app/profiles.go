@@ -18,7 +18,7 @@ import (
 
 const (
 	maxAvatarUpload = 5 << 20
-	maxCoverUpload  = 8 << 20
+	maxCoverUpload  = 7 << 20
 )
 
 func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +41,9 @@ func (s *Server) updateMyProfile(w http.ResponseWriter, r *http.Request) {
 		Bio         string `json:"bio"`
 	}
 	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !s.approveContent(w, r, "profile", moderationText("昵称："+input.DisplayName, "简介："+input.Bio)) {
 		return
 	}
 	user, err := s.store.UpdateUserProfile(currentUser(r).ID, input.DisplayName, input.Bio)
@@ -86,8 +89,8 @@ func (s *Server) uploadMyAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	config, _, err := image.DecodeConfig(io.LimitReader(file, maxAvatarUpload+1))
-	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 4096 || config.Height > 4096 {
-		writeError(w, 400, "avatar_dimensions_invalid", "头像尺寸无效或超过 4096 × 4096")
+	if err != nil || config.Width < 16 || config.Height < 16 || config.Width > 6000 || config.Height > 6000 {
+		writeError(w, 400, "avatar_dimensions_invalid", "头像尺寸必须在 16 × 16 至 6000 × 6000 之间")
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -116,6 +119,10 @@ func (s *Server) uploadMyAvatar(w http.ResponseWriter, r *http.Request) {
 	if copyErr != nil || syncErr != nil || closeErr != nil || written == 0 || written > maxAvatarUpload {
 		_ = os.Remove(targetPath)
 		writeError(w, 400, "avatar_upload_failed", "头像为空、过大或保存失败")
+		return
+	}
+	if !s.approveImagePath(w, r, "profile", targetPath) {
+		_ = os.Remove(targetPath)
 		return
 	}
 	oldAvatar := currentUser(r).AvatarURL
@@ -147,7 +154,7 @@ func (s *Server) uploadMyCover(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	if header.Size < 1 || header.Size > maxCoverUpload {
-		writeError(w, http.StatusBadRequest, "cover_size_invalid", "封面不能为空或超过 8 MB")
+		writeError(w, http.StatusBadRequest, "cover_size_invalid", "封面不能为空或超过 7 MB")
 		return
 	}
 	extension := strings.ToLower(filepath.Ext(filepath.Base(header.Filename)))
@@ -172,8 +179,8 @@ func (s *Server) uploadMyCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	config, _, err := image.DecodeConfig(io.LimitReader(file, maxCoverUpload+1))
-	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 8192 || config.Height > 8192 {
-		writeError(w, http.StatusBadRequest, "cover_dimensions_invalid", "封面尺寸无效或超过 8192 × 8192")
+	if err != nil || config.Width < 16 || config.Height < 16 || config.Width > 6000 || config.Height > 6000 {
+		writeError(w, http.StatusBadRequest, "cover_dimensions_invalid", "封面尺寸必须在 16 × 16 至 6000 × 6000 之间")
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -202,6 +209,10 @@ func (s *Server) uploadMyCover(w http.ResponseWriter, r *http.Request) {
 	if copyErr != nil || syncErr != nil || closeErr != nil || written == 0 || written > maxCoverUpload {
 		_ = os.Remove(targetPath)
 		writeError(w, http.StatusBadRequest, "cover_upload_failed", "封面为空、过大或保存失败")
+		return
+	}
+	if !s.approveImagePath(w, r, "profile", targetPath) {
+		_ = os.Remove(targetPath)
 		return
 	}
 	oldCover := currentUser(r).CoverURL
@@ -302,6 +313,9 @@ func (s *Server) createVerificationApplication(w http.ResponseWriter, r *http.Re
 		Statement        string `json:"statement"`
 	}
 	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !s.approveContent(w, r, "verification_application", moderationText("认证名称："+input.RequestedLabel, "申请说明："+input.Statement)) {
 		return
 	}
 	item, err := s.store.CreateVerificationApplication(currentUser(r).ID, input.VerificationType, input.RequestedLabel, input.EvidenceURL, input.Statement)
