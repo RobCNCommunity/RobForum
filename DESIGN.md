@@ -31,11 +31,14 @@
 - The theme control is an icon-only sun/moon toggle in the desktop rail, mobile drawer, and public authentication shell. Its accessible label always describes the next theme.
 - Use buttons for actions and links only for navigation. Never nest action buttons inside a route link.
 - Repeated content may use compact rows or cards; page sections remain unframed.
+- Feed post action rows expose comment, repost, quote, like, and share as stable icon controls. Comment expands the shared compact composer directly beneath the post; quote opens the post composer with visible source context.
+- Post body inputs use an edit/preview segmented control. Published Markdown is rendered through the shared sanitized content component; feed and management surfaces use its compact variant.
 - Inputs use the shared surface, border, focus ring, and semantic status colors from `styles.css`.
 
 ## Content Rules
 
 - Optional post titles are omitted completely; the body becomes the primary text.
+- Post bodies support GitHub-flavored Markdown. Unsafe HTML and interactive elements are removed before rendering; external links open in a separate tab with no opener access.
 - Tags are compact metadata, not a replacement for board navigation.
 - Images and videos show the real uploaded media with predictable aspect constraints.
 - Dense controls must remain readable in Simplified Chinese at 320px and wider.

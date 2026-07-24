@@ -5,7 +5,9 @@ import { Notify } from '@nutui/nutui'
 import { createPost, errorMessage, fetchBoards, type Board } from '@/api'
 import PageContainer from '@/components/PageContainer.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import QuotedPostContext from '@/components/QuotedPostContext.vue'
 import { useAuthStore } from '@/stores/auth'
 
 interface SelectedMedia {
@@ -23,6 +25,7 @@ const tags = ref<string[]>([])
 const tagDraft = ref('')
 const isMobile = ref(false)
 const loading = ref(false)
+const editorMode = ref<'edit' | 'preview'>('edit')
 const form = reactive({
   board_id: undefined as number | undefined,
   title: '',
@@ -47,6 +50,21 @@ function updateMobile(event: MediaQueryListEvent | MediaQueryList) {
 
 function isVideo(file: File) {
   return file.type.startsWith('video/')
+}
+
+function prefillQuote(content: string) {
+  if (!form.content) form.content = content
+}
+
+function handleEditorTabKeydown(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+  if (!(event.currentTarget instanceof HTMLButtonElement)) return
+  event.preventDefault()
+  const nextMode = editorMode.value === 'edit' ? 'preview' : 'edit'
+  editorMode.value = nextMode
+  event.currentTarget.parentElement
+    ?.querySelector<HTMLButtonElement>(`[data-editor-mode="${nextMode}"]`)
+    ?.focus()
 }
 
 function chooseMedia(event: Event) {
@@ -177,11 +195,21 @@ onBeforeUnmount(() => {
         <AppIcon name="chevron" size="16" />
       </label>
 
+      <QuotedPostContext @loaded="prefillQuote" />
+
       <div class="rf-mobile-editor">
         <UserAvatar :src="auth.user?.avatar_url" :name="auth.user?.display_name" :size="40" />
         <div>
           <input v-model="form.title" maxlength="180" placeholder="添加标题（可选）" aria-label="帖子标题，可选" />
-          <textarea v-model="form.content" rows="9" maxlength="50000" autofocus placeholder="分享你的想法" aria-label="帖子正文" />
+          <div class="rf-markdown-mode" role="tablist" aria-label="正文模式">
+            <button type="button" role="tab" data-editor-mode="edit" :tabindex="editorMode === 'edit' ? 0 : -1" :aria-selected="editorMode === 'edit'" :class="{ active: editorMode === 'edit' }" @click="editorMode = 'edit'" @keydown="handleEditorTabKeydown"><AppIcon name="edit" size="15" />编辑</button>
+            <button type="button" role="tab" data-editor-mode="preview" :tabindex="editorMode === 'preview' ? 0 : -1" :aria-selected="editorMode === 'preview'" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'" @keydown="handleEditorTabKeydown"><AppIcon name="eye" size="15" />预览</button>
+          </div>
+          <textarea v-show="editorMode === 'edit'" v-model="form.content" rows="9" maxlength="50000" autofocus placeholder="分享你的想法" aria-label="帖子正文，支持 Markdown" />
+          <div v-show="editorMode === 'preview'" class="rf-markdown-preview">
+            <MarkdownContent v-if="form.content.trim()" :source="form.content" />
+            <span v-else>暂无内容</span>
+          </div>
         </div>
       </div>
 
@@ -205,6 +233,7 @@ onBeforeUnmount(() => {
 
     <section v-else class="rf-create-post">
       <header class="rf-create-heading"><h1>发布帖子</h1></header>
+      <QuotedPostContext @loaded="prefillQuote" />
       <nut-form ref="formRef" :model-value="form" :rules="rules" class="rf-create-form">
         <nut-form-item label="板块" required>
           <select v-model="form.board_id" class="rf-board-select" required aria-label="选择板块">
@@ -216,7 +245,20 @@ onBeforeUnmount(() => {
           <input v-model="form.title" class="rf-create-title-input" maxlength="180" placeholder="标题（可选）" />
         </nut-form-item>
         <nut-form-item label="正文" prop="content" class="rf-content-item">
-          <nut-textarea v-model="form.content" :rows="9" :max-length="50000" limit-show placeholder="分享你的想法" />
+          <div class="rf-markdown-editor">
+            <div class="rf-markdown-mode" role="tablist" aria-label="正文模式">
+              <button type="button" role="tab" data-editor-mode="edit" :tabindex="editorMode === 'edit' ? 0 : -1" :aria-selected="editorMode === 'edit'" :class="{ active: editorMode === 'edit' }" @click="editorMode = 'edit'" @keydown="handleEditorTabKeydown"><AppIcon name="edit" size="15" />编辑</button>
+              <button type="button" role="tab" data-editor-mode="preview" :tabindex="editorMode === 'preview' ? 0 : -1" :aria-selected="editorMode === 'preview'" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'" @keydown="handleEditorTabKeydown"><AppIcon name="eye" size="15" />预览</button>
+            </div>
+            <div v-show="editorMode === 'edit'" class="rf-desktop-markdown-input">
+              <textarea v-model="form.content" rows="9" maxlength="50000" placeholder="分享你的想法" aria-label="帖子正文，支持 Markdown" />
+              <span>{{ form.content.length }}/50000</span>
+            </div>
+            <div v-show="editorMode === 'preview'" class="rf-markdown-preview">
+              <MarkdownContent v-if="form.content.trim()" :source="form.content" />
+              <span v-else>暂无内容</span>
+            </div>
+          </div>
         </nut-form-item>
         <nut-form-item label="标签">
           <div class="rf-tag-editor">
@@ -244,6 +286,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .rf-create-post { min-height: 100%; padding: 8px 20px 28px; color: var(--rf-text); background: var(--rf-bg); }
 .rf-create-form { color: var(--rf-text); background: transparent; }
+.rf-create-form :deep(.nut-cell-group__warp) { margin: 0; overflow: visible; background: transparent; }
 .rf-create-form :deep(.nut-form-item) { padding: 17px 0; border-bottom: 1px solid var(--rf-line); background: transparent; }
 .rf-create-form :deep(.nut-form-item__label) { width: 72px; color: var(--rf-text); font-weight: 650; }
 .rf-create-form :deep(.nut-form-item__body),
@@ -272,9 +315,15 @@ onBeforeUnmount(() => {
 }
 .rf-board-select option { color: var(--rf-text); background: var(--rf-bg); }
 .rf-content-item :deep(.nut-form-item__body) { align-items: flex-start; }
-.rf-content-item :deep(.nut-textarea) { overflow: hidden; padding: 12px 12px 32px !important; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg-subtle) !important; }
-.rf-content-item :deep(.nut-textarea__textarea) { min-height: 220px; color: var(--rf-text) !important; background: transparent !important; line-height: 1.65; resize: vertical; }
-.rf-content-item :deep(.nut-textarea__limit) { right: 12px; bottom: 9px; color: var(--rf-muted); background: transparent; font-size: 12px; font-variant-numeric: tabular-nums; }
+.rf-markdown-editor { width: 100%; min-width: 0; }
+.rf-markdown-mode { display: inline-grid; grid-template-columns: repeat(2, minmax(72px, 1fr)); gap: 2px; margin-bottom: 8px; padding: 3px; border: 1px solid var(--rf-line); border-radius: 7px; background: var(--rf-bg-subtle); }
+.rf-markdown-mode button { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border-radius: 5px; color: var(--rf-muted); background: transparent; font-size: 13px; font-weight: 650; }
+.rf-markdown-mode button.active { color: var(--rf-text); background: var(--rf-bg); box-shadow: 0 1px 3px color-mix(in srgb, var(--rf-text) 10%, transparent); }
+.rf-markdown-preview { min-height: 254px; padding: 12px; overflow: auto; border: 1px solid var(--rf-line); border-radius: 10px; color: var(--rf-text); background: var(--rf-bg-subtle); line-height: 1.65; }
+.rf-markdown-preview > span { color: var(--rf-muted); }
+.rf-desktop-markdown-input { position: relative; overflow: hidden; padding: 12px 12px 32px; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg-subtle); }
+.rf-desktop-markdown-input textarea { display: block; width: 100%; min-height: 220px; padding: 0; border: 0; outline: 0; color: var(--rf-text); background: transparent; font: inherit; line-height: 1.65; resize: vertical; }
+.rf-desktop-markdown-input > span { position: absolute; right: 12px; bottom: 9px; color: var(--rf-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .rf-upload-item :deep(.nut-form-item__body),
 .rf-upload-item :deep(.nut-form-item__body__slots) { width: 100%; }
 .rf-upload-head { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 11px; }
@@ -336,7 +385,9 @@ onBeforeUnmount(() => {
 .rf-mobile-editor { display: grid; flex: 1; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 10px; padding: 14px; }
 .rf-mobile-editor > div { min-width: 0; }
 .rf-mobile-editor input { width: 100%; height: 40px; padding: 0; border: 0; border-bottom: 1px solid var(--rf-line); outline: 0; color: var(--rf-text); background: transparent; font-size: 17px; font-weight: 650; }
+.rf-mobile-editor .rf-markdown-mode { margin: 8px 0 0; }
 .rf-mobile-editor textarea { display: block; width: 100%; min-height: 210px; padding: 12px 0; border: 0; outline: 0; color: var(--rf-text); background: transparent; font-size: 18px; line-height: 1.55; resize: none; }
+.rf-mobile-editor .rf-markdown-preview { min-height: 210px; padding: 12px 0; border: 0; background: transparent; font-size: 17px; }
 .rf-mobile-composer > .rf-tag-list, .rf-mobile-composer > .rf-selected-media { margin: 0; padding: 0 14px 10px 64px; }
 .rf-mobile-tools { position: sticky; bottom: var(--rf-mobile-bottom-nav); z-index: 4; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 12px; border-top: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 94%, transparent); backdrop-filter: blur(12px); }
 .rf-mobile-tools > label:first-child { display: inline-grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: var(--primary); cursor: pointer; }

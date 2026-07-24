@@ -10,17 +10,17 @@ import {
   fetchNotices,
   fetchPostsPage,
   fetchRecommendedPostsPage,
-  togglePostLike,
   type AdSlot,
   type Board,
   type Notice,
   type Post,
 } from '@/api'
 import { useAuthStore } from '@/stores/auth'
-import FeedPostRow from '@/components/FeedPostRow.vue'
+import FeedPostThread from '@/components/FeedPostThread.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import { markdownToPlainText } from '@/lib/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,7 +39,6 @@ const noticeOpen = ref(false)
 const feedMode = ref<'for-you' | 'following'>('for-you')
 const activeAdIndex = ref(0)
 const carouselPaused = ref(false)
-const likingPostIDs = ref<number[]>([])
 let adTimer: number | undefined
 let feedRequestVersion = 0
 
@@ -169,43 +168,8 @@ function formatDate(value: string) {
 }
 
 function excerpt(value: string) {
-  const text = (value || '').replace(/\s+/g, ' ').trim()
+  const text = markdownToPlainText(value)
   return text.length > 150 ? `${text.slice(0, 150)}...` : text
-}
-
-async function likePost(item: Post) {
-  if (!auth.user) {
-    await router.push({ path: '/login', query: { redirect: route.fullPath } })
-    return
-  }
-  if (likingPostIDs.value.includes(item.id)) return
-  likingPostIDs.value = [...likingPostIDs.value, item.id]
-  try {
-    Object.assign(item, await togglePostLike(item.id))
-  } catch (cause) {
-    Notify.danger(errorMessage(cause, '点赞失败'))
-  } finally {
-    likingPostIDs.value = likingPostIDs.value.filter((id) => id !== item.id)
-  }
-}
-
-function openPostMedia(item: Post, index: number) {
-  router.push({ path: `/posts/${item.id}`, query: { media: String(index) } })
-}
-
-async function sharePost(item: Post) {
-  const url = new URL(`/posts/${item.id}`, window.location.origin).href
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: item.title || excerpt(item.content), url })
-      return
-    }
-    await navigator.clipboard.writeText(url)
-    Notify.success('帖子链接已复制')
-  } catch (cause) {
-    if (cause instanceof DOMException && cause.name === 'AbortError') return
-    Notify.warn('分享失败，请打开帖子后复制地址')
-  }
 }
 
 watch(() => route.params.slug, () => { load() })
@@ -350,15 +314,7 @@ onBeforeUnmount(stopAdTimer)
       @refresh="refreshFeed"
     >
       <section class="rf-timeline">
-        <FeedPostRow
-          v-for="post in normalPosts"
-          :key="post.id"
-          :post="post"
-          :liking="likingPostIDs.includes(post.id)"
-          @like="likePost"
-          @open-media="openPostMedia"
-          @share="sharePost"
-        />
+        <FeedPostThread v-for="post in normalPosts" :key="post.id" :post="post" />
 
         <div v-if="!normalPosts.length" class="rf-empty">
           <nut-empty description="这里还没有内容" />

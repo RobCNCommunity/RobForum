@@ -44,6 +44,7 @@ import {
   PackageOpen,
   PenLine,
   Plus,
+  Quote,
   Repeat2,
   Search,
   Send,
@@ -129,6 +130,7 @@ const icons: Record<string, Component> = {
   balance: CircleDollarSign,
   chevron: ChevronRight,
   photo: FileImage,
+  quote: Quote,
   pen: PenLine,
   plainCheck: Check,
 }

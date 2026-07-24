@@ -10,6 +10,7 @@ import PostTagList from '@/components/PostTagList.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 type ModerationTab = 'posts' | 'reports'
 type PostAction = 'published' | 'rejected' | 'hidden' | 'deleted'
@@ -196,7 +197,7 @@ onMounted(load)
             <div><div class="rf-post-meta"><strong>{{ item.author_name }}</strong><VerifiedBadge :verified="item.author_verified" :label="item.author_verification_label" /><MembershipBadge :active="item.author_member" :tier-id="item.author_membership_tier_id" /><span>·</span><time>{{ new Date(item.created_at).toLocaleString('zh-CN') }}</time></div><small>#{{ item.id }} · {{ item.board_name }}</small></div>
             <span class="rf-status-chip" :class="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
           </header>
-          <PostTagList :tags="item.tags" compact /><h2 v-if="item.title">{{ item.title }}</h2><p>{{ item.content }}</p>
+          <PostTagList :tags="item.tags" compact /><h2 v-if="item.title">{{ item.title }}</h2><MarkdownContent :source="item.content" compact />
           <PostMediaGrid v-if="item.media?.length" :media="item.media" />
           <footer><div class="rf-admin-post-metrics"><span>{{ item.views }} 浏览</span><span>{{ item.comment_count }} 评论</span><span>{{ item.like_count }} 点赞</span></div><div class="rf-row-actions">
             <button v-if="item.status === 'published'" type="button" class="rf-secondary-button rf-button-small" @click="router.push(`/posts/${item.id}`)">查看</button>
@@ -269,7 +270,8 @@ onMounted(load)
 .rf-admin-post-row > header > div, .rf-admin-report-row > header > div { min-width: 0; }
 .rf-admin-post-row > header small, .rf-admin-report-row > header small { display: block; margin-top: 3px; overflow: hidden; color: var(--rf-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .rf-admin-post-row h2 { margin: 13px 0 7px; font-size: 18px; line-height: 1.4; }
-.rf-admin-post-row > p, .rf-report-target p { display: -webkit-box; max-height: 9.6em; margin: 0 0 12px; overflow: hidden; color: var(--rf-text); line-height: 1.6; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 6; }
+.rf-admin-post-row :deep(.rf-markdown), .rf-report-target p { max-height: 9.6em; margin: 0 0 12px; overflow: hidden; color: var(--rf-text); line-height: 1.6; }
+.rf-report-target p { display: -webkit-box; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 6; }
 .rf-admin-post-row :deep(.rf-post-media-grid) { max-width: 540px; margin-top: 12px; }
 .rf-admin-post-row > footer, .rf-admin-report-row > footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--rf-line); }
 .rf-admin-post-metrics { display: flex; gap: 14px; color: var(--rf-muted); font-size: 11px; }

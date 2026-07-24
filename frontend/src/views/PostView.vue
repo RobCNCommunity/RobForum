@@ -27,6 +27,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import CommentComposer from '@/components/CommentComposer.vue'
 import CommentThreadItem from '@/components/CommentThreadItem.vue'
 import ContentReportDialog from '@/components/ContentReportDialog.vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import PostImageViewer from '@/components/PostImageViewer.vue'
 import PostMediaGrid from '@/components/PostMediaGrid.vue'
@@ -449,7 +450,7 @@ onBeforeUnmount(() => {
           </div>
           <PostTagList :tags="post.tags" class="rf-x-status-tags" />
           <h1 v-if="post.title">{{ post.title }}</h1>
-          <div v-if="post.content" class="rf-x-status-content">{{ post.content }}</div>
+          <MarkdownContent v-if="post.content" :source="post.content" class="rf-x-status-content" />
           <PostMediaGrid v-if="post.media?.length" :media="post.media" custom-preview @open-preview="openImageViewer" />
 
           <div class="rf-x-status-date">
@@ -521,7 +522,7 @@ onBeforeUnmount(() => {
       <section class="rf-viewer-post-copy">
         <PostTagList :tags="post.tags" compact class="rf-viewer-tags" />
         <h2 v-if="post.title">{{ post.title }}</h2>
-        <p v-if="post.content">{{ post.content }}</p>
+        <MarkdownContent v-if="post.content" :source="post.content" class="rf-viewer-markdown" />
         <time>{{ formatPostDate(post.created_at) }}</time>
       </section>
 
@@ -598,7 +599,7 @@ onBeforeUnmount(() => {
 .rf-x-status-context span:first-child { color: var(--primary); font-weight: 650; }
 .rf-x-status-tags { margin-top: 9px; }
 .rf-x-status-post h1 { margin: 8px 0 8px; font-size: 23px; line-height: 1.3; overflow-wrap: anywhere; }
-.rf-x-status-content { font-size: 18px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rf-x-status-content { font-size: 18px; line-height: 1.55; }
 .rf-x-status-date { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 15px; padding-bottom: 14px; color: var(--rf-muted); font-size: 14px; }
 .rf-x-status-date strong { color: var(--rf-text); font-variant-numeric: tabular-nums; }
 .rf-x-status-stats { display: flex; flex-wrap: wrap; gap: 18px; min-height: 50px; align-items: center; border-top: 1px solid var(--rf-line); color: var(--rf-muted); font-size: 14px; }
@@ -635,7 +636,7 @@ onBeforeUnmount(() => {
 .rf-viewer-post-copy { padding: 13px 16px; border-bottom: 1px solid var(--rf-line); }
 .rf-viewer-tags { margin-bottom: 8px; }
 .rf-viewer-post-copy h2 { margin: 0 0 7px; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
-.rf-viewer-post-copy p { margin: 0 0 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rf-viewer-markdown { margin: 0 0 10px; line-height: 1.55; }
 .rf-viewer-post-copy time { color: var(--rf-muted); font-size: 12px; }
 .rf-viewer-stats { display: flex; flex-wrap: wrap; gap: 13px; min-height: 44px; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--rf-line); color: var(--rf-muted); font-size: 13px; }
 .rf-viewer-stats strong { color: var(--rf-text); font-variant-numeric: tabular-nums; }

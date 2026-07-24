@@ -7,6 +7,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 import PostTagList from '@/components/PostTagList.vue'
 
 type SearchTab = 'all' | 'posts' | 'resources' | 'users'
@@ -147,14 +148,14 @@ watch(
             <header><h1 id="search-posts-title">帖子</h1><span>{{ results.posts.length }} 条结果</span></header>
             <RouterLink v-for="post in results.posts" :key="post.id" :to="`/posts/${post.id}`" class="rf-search-post">
               <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" />
-              <span class="rf-search-copy">
+              <div class="rf-search-copy">
                 <span class="rf-search-author"><strong>{{ post.author_name }}</strong><VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /><MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" /><small>@user_{{ post.author_id }}</small></span>
                 <span class="rf-search-post-meta"><em>{{ post.board_name }}</em></span>
                 <PostTagList :tags="post.tags" compact class="rf-search-tags" />
                 <strong v-if="post.title" class="rf-search-title">{{ post.title }}</strong>
-                <span v-if="excerpt(post.content)" class="rf-search-excerpt" :class="{ primary: !post.title }">{{ excerpt(post.content) }}</span>
+                <MarkdownContent v-if="post.content.trim()" :source="post.content" compact class="rf-search-excerpt" :class="{ primary: !post.title }" />
                 <span class="rf-search-stats"><span><AppIcon name="message" size="15" />{{ post.comment_count }}</span><span><AppIcon name="heart" size="15" />{{ post.like_count }}</span></span>
-              </span>
+              </div>
               <AppIcon name="chevron" size="18" />
             </RouterLink>
           </section>
