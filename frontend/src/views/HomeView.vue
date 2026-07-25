@@ -327,7 +327,7 @@ onBeforeUnmount(stopAdTimer)
     </InfiniteLoading>
 
     <nut-popup v-model:visible="noticeOpen" position="right" :style="{ width: 'min(420px, 100vw)', height: '100%' }" closeable round>
-      <section class="rf-notice-sheet"><header><h2>社区公告</h2></header><div v-if="!notices.length" class="rf-empty">暂无公告</div><article v-for="item in notices" :key="item.id"><div><b v-if="item.pinned">置顶</b><strong>{{ item.title }}</strong></div><p>{{ item.content }}</p><time>{{ formatDate(item.updated_at || item.created_at) }}</time></article></section>
+      <section class="rf-notice-sheet"><header><h2>社区公告</h2></header><div v-if="!notices.length" class="rf-empty">暂无公告</div><article v-for="item in notices" :key="item.id"><div><b v-if="item.pinned">置顶</b><strong>{{ item.title }}</strong></div><p>{{ item.content }}</p><footer><time>{{ formatDate(item.updated_at || item.created_at) }}</time><a v-if="item.link_url" :href="item.link_url" target="_blank" rel="noopener noreferrer">查看详情<AppIcon name="arrow" size="14" /></a></footer></article></section>
     </nut-popup>
   </PageContainer>
 </template>
@@ -344,6 +344,8 @@ onBeforeUnmount(stopAdTimer)
 .rf-home-notice { position: relative; display: inline-grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 50%; color: var(--rf-text); background: transparent; }
 .rf-home-notice:hover { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }
 .rf-home-notice > span { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; padding: 0 4px; place-items: center; border: 2px solid var(--rf-bg); border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-size: 10px; font-variant-numeric: tabular-nums; line-height: 1; }
+.rf-notice-sheet article footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rf-notice-sheet article footer a { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 3px; color: var(--primary); font-size: 12px; font-weight: 700; }
 .rf-feed-tabs { margin: 0 -1px -1px; }
 .rf-feed-tabs :deep(.nut-tabs__content) { display: none; }
 .rf-feed-tabs :deep(.nut-tabs__titles) { min-height: 44px; background: transparent; }
@@ -367,5 +369,5 @@ onBeforeUnmount(stopAdTimer)
 .rf-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 42px 20px; color: var(--rf-muted); text-align: center; }.rf-empty > span { color: var(--rf-muted); }.rf-empty .nut-empty { padding: 0; }.rf-empty .nut-button { margin-top: 8px; }
 .rf-notice-sheet { height: 100%; overflow-y: auto; padding: 22px 20px; background: var(--rf-bg); }.rf-notice-sheet header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }.rf-notice-sheet h2 { margin: 0; font-size: 20px; }.rf-notice-sheet article { padding: 16px 0; border-bottom: 1px solid var(--rf-line); }.rf-notice-sheet article div { display: flex; align-items: center; gap: 8px; }.rf-notice-sheet article b { color: var(--rf-danger); font-size: 12px; }.rf-notice-sheet article p { color: var(--rf-muted); white-space: pre-wrap; line-height: 1.6; }.rf-notice-sheet article time { color: var(--rf-faint); font-size: 12px; }
 @media (max-width: 1019px) { .rf-home-sticky { top: var(--rf-header); } .rf-home-titlebar { display: none; } .rf-home-mobile-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rf-line); } .rf-home-mobile-search :deep(.nut-searchbar) { min-width: 0; flex: 1; padding: 0; border-radius: var(--rf-pill); } .rf-home-mobile-search :deep(.nut-searchbar__search-input) { border-radius: var(--rf-pill); } .rf-home-mobile-search > .nut-button { flex: 0 0 auto; } }
-@media (max-width: 560px) { .rf-ad-carousel { height: 104px; }.rf-composer { display: none; }.rf-pinned-row { padding-inline: 12px; }.rf-section-label { padding-inline: 12px; }.rf-home-mobile-search { padding-inline: 10px; }.rf-feed-gate { min-height: 260px; }.rf-home-mobile-search .rf-home-notice { width: 36px; height: 36px; flex-basis: 36px; } }
+@media (max-width: 560px) { .rf-ad-carousel { height: 104px; }.rf-composer { display: none; }.rf-pinned-row { padding-inline: 12px; }.rf-section-label { padding-inline: 12px; }.rf-home-mobile-search { padding-inline: 10px; }.rf-feed-gate { min-height: 260px; }.rf-home-mobile-search .rf-home-notice { width: 44px; height: 44px; flex-basis: 44px; } }
 </style>

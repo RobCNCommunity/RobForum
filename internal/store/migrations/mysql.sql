@@ -112,6 +112,49 @@ CREATE TABLE IF NOT EXISTS user_follows (
   CONSTRAINT fk_user_follows_followed FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS user_progress (
+  user_id BIGINT NOT NULL PRIMARY KEY,
+  experience BIGINT NOT NULL DEFAULT 0,
+  total_checkins INT NOT NULL DEFAULT 0,
+  current_streak INT NOT NULL DEFAULT 0,
+  longest_streak INT NOT NULL DEFAULT 0,
+  last_checkin_date DATE NULL,
+  updated_at DATETIME(6) NOT NULL,
+  CONSTRAINT fk_user_progress_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_checkins (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  checkin_date DATE NOT NULL,
+  experience_awarded INT NOT NULL,
+  streak INT NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_user_checkins_day (user_id, checkin_date),
+  INDEX idx_user_checkins_user_created (user_id, created_at),
+  CONSTRAINT fk_user_checkins_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS badges (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  slug VARCHAR(64) NOT NULL UNIQUE,
+  name VARCHAR(80) NOT NULL,
+  description VARCHAR(240) NOT NULL,
+  icon VARCHAR(32) NOT NULL DEFAULT 'badge',
+  color VARCHAR(16) NOT NULL DEFAULT '#1d9bf0',
+  created_at DATETIME(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id BIGINT NOT NULL,
+  badge_id BIGINT NOT NULL,
+  awarded_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (user_id, badge_id),
+  INDEX idx_user_badges_awarded (user_id, awarded_at),
+  CONSTRAINT fk_user_badges_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_user_badges_badge FOREIGN KEY (badge_id) REFERENCES badges(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS auth_sessions (
   token_hash VARBINARY(32) NOT NULL PRIMARY KEY,
   user_id BIGINT NOT NULL,
@@ -497,6 +540,7 @@ CREATE TABLE IF NOT EXISTS notices (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(160) NOT NULL,
   content MEDIUMTEXT NOT NULL,
+  link_url VARCHAR(500) NOT NULL DEFAULT '',
   level VARCHAR(16) NOT NULL DEFAULT 'info',
   pinned TINYINT(1) NOT NULL DEFAULT 0,
   enabled TINYINT(1) NOT NULL DEFAULT 1,

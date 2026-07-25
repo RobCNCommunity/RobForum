@@ -84,6 +84,11 @@ export interface User {
   created_at: string
 }
 
+export interface Badge { id: number; slug: string; name: string; description: string; icon: string; color: string; awarded_at: string }
+export interface UserProgress { experience: number; total_checkins: number; current_streak: number; longest_streak: number; last_checkin_date?: string; checked_in_today: boolean; level: number; level_name: string; level_min_experience: number; next_level_experience: number; level_progress: number }
+export interface CheckinRecord { date: string; experience_awarded: number; streak: number; created_at: string }
+export interface CheckinSummary { progress: UserProgress; history: CheckinRecord[]; badges: Badge[]; newly_awarded: Badge[] }
+
 export interface Board { id: number; slug: string; name: string; description: string; icon: string; post_count: number }
 export interface PostMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
 export interface Post { id: number; board_id: number; board_name: string; author_id: number; author_name: string; author_avatar: string; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; title: string; content: string; status: string; pinned: boolean; featured: boolean; views: number; comment_count: number; like_count: number; repost_count: number; liked: boolean; bookmarked: boolean; reposted: boolean; tags?: string[]; media?: PostMedia[]; created_at: string; updated_at: string }
@@ -91,7 +96,7 @@ export interface Comment { id: number; post_id: number; parent_id?: number; auth
 export interface ResourceFile { id: number; resource_id: number; original_name: string; mime_type: string; size_bytes: number; sha256: string; created_at: string }
 export interface ResourceMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
 export interface Resource { id: number; creator_id: number; creator_name: string; creator_verified: boolean; creator_verification_label?: string; creator_member: boolean; creator_membership_tier_id?: number; title: string; description: string; game: string; version: string; resource_type: string; price_cents: number; status: string; review_reason?: string; download_count: number; sales_count: number; file?: ResourceFile; media?: ResourceMedia[]; created_at: string; updated_at: string }
-export interface PublicUser { id: number; display_name: string; avatar_url: string; cover_url: string; bio: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; roblox_name?: string; roblox_verified: boolean; created_at: string }
+export interface PublicUser { id: number; display_name: string; avatar_url: string; cover_url: string; bio: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; roblox_name?: string; roblox_verified: boolean; created_at: string; progress: UserProgress; badges: Badge[] }
 export interface AdminUser { id: number; email: string; display_name: string; avatar_url: string; role: string; status: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; membership_expires_at?: string; post_count: number; comment_count: number; resource_count: number; created_at: string; updated_at: string }
 export interface UserProfile { user: PublicUser; posts: Post[]; resources: Resource[]; follower_count: number; following_count: number; following: boolean }
 export interface UserSearchResult extends PublicUser { post_count: number; resource_count: number; hot_score: number }
@@ -148,6 +153,7 @@ export interface Notice {
   id: number
   title: string
   content: string
+  link_url: string
   level: string
   pinned: boolean
   enabled: boolean
@@ -249,6 +255,8 @@ export async function uploadMyAvatar(file: File) { const form = new FormData(); 
 export async function uploadMyCover(file: File) { const form = new FormData(); form.append('file', file); return data<User>(await api.post('/me/cover', form)) }
 export async function deleteMyCover() { return data<User>(await api.delete('/me/cover')) }
 export async function fetchUserProfile(id: number) { return data<UserProfile>(await api.get(`/users/${id}`)) }
+export async function fetchCheckin() { return data<CheckinSummary>(await api.get('/me/checkin')) }
+export async function createCheckin() { return data<CheckinSummary>(await api.post('/me/checkin')) }
 export async function reportUserProfile(id: number, reason: string) { return data<ContentReport>(await api.post(`/users/${id}/report`, { reason })) }
 export async function searchUsers(q = '') { return data<UserSearchResult[]>(await api.get('/users/search', { params: { q } })) }
 export async function searchUsersPage(q = '', offset = 0, limit = 30) { return data<PagedResult<UserSearchResult>>(await api.get('/users/search', { params: { q, offset, limit, paged: 1 } })) }
@@ -326,8 +334,8 @@ export async function updateAdminAd(id: number, input: { title?: string; image_u
 export async function deleteAdminAd(id: number) { return data<{ deleted: boolean }>(await api.delete('/admin/ads/' + id)) }
 export async function fetchNotices() { return data<Notice[]>(await api.get('/notices')) }
 export async function fetchAdminNotices() { return data<Notice[]>(await api.get('/admin/notices')) }
-export async function createAdminNotice(input: { title: string; content: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.post('/admin/notices', input)) }
-export async function updateAdminNotice(id: number, input: { title?: string; content?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.put('/admin/notices/' + id, input)) }
+export async function createAdminNotice(input: { title: string; content: string; link_url?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.post('/admin/notices', input)) }
+export async function updateAdminNotice(id: number, input: { title?: string; content?: string; link_url?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.put('/admin/notices/' + id, input)) }
 export async function deleteAdminNotice(id: number) { return data<{ deleted: boolean }>(await api.delete('/admin/notices/' + id)) }
 export async function pinPost(id: number, pinned: boolean) { return data<Post>(await api.patch('/admin/posts/' + id + '/pin', { pinned })) }
 export async function fetchWallet() { return data<WalletSummary>(await api.get('/me/wallet')) }

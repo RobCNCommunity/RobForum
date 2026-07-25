@@ -20,6 +20,7 @@ const router = createRouter({
     { path: '/bookmarks', component: () => import('./views/BookmarksView.vue'), meta: { requiresAuth: true, title: '收藏' } },
     { path: '/wallet', component: () => import('./views/WalletView.vue'), meta: { requiresAuth: true, title: '我的钱包' } },
     { path: '/membership', component: () => import('./views/MembershipView.vue'), meta: { requiresAuth: true, title: '会员中心' } },
+    { path: '/check-in', component: () => import('./views/CheckInView.vue'), meta: { requiresAuth: true, title: '签到与资历' } },
     { path: '/settings/profile', component: () => import('./views/ProfileSettingsView.vue'), meta: { requiresAuth: true, title: '资料设置' } },
     { path: '/verification/apply', component: () => import('./views/VerificationApplyView.vue'), meta: { requiresAuth: true, title: '蓝微认证' } },
     { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },

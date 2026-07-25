@@ -182,7 +182,7 @@ func (s *Store) ListPublicNotices(limit int) ([]domain.Notice, error) {
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	rows, err := s.db.Query(`SELECT id, title, content, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE enabled = 1 ORDER BY pinned DESC, updated_at DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT id, title, content, link_url, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE enabled = 1 ORDER BY pinned DESC, updated_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (s *Store) ListPublicNotices(limit int) ([]domain.Notice, error) {
 }
 
 func (s *Store) ListAdminNotices() ([]domain.Notice, error) {
-	rows, err := s.db.Query(`SELECT id, title, content, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices ORDER BY pinned DESC, updated_at DESC`)
+	rows, err := s.db.Query(`SELECT id, title, content, link_url, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices ORDER BY pinned DESC, updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -218,15 +218,16 @@ func (s *Store) ListAdminNotices() ([]domain.Notice, error) {
 func scanNotice(row adScanner) (domain.Notice, error) {
 	var item domain.Notice
 	var pinned, enabled int
-	err := row.Scan(&item.ID, &item.Title, &item.Content, &item.Level, &pinned, &enabled, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &item.Title, &item.Content, &item.LinkURL, &item.Level, &pinned, &enabled, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
 	item.Pinned = pinned != 0
 	item.Enabled = enabled != 0
 	return item, err
 }
 
-func (s *Store) CreateNotice(userID int64, title, content, level string, pinned, enabled bool) (domain.Notice, error) {
+func (s *Store) CreateNotice(userID int64, title, content, linkURL, level string, pinned, enabled bool) (domain.Notice, error) {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
+	linkURL = strings.TrimSpace(linkURL)
 	level = strings.TrimSpace(level)
 	if title == "" || content == "" {
 		return domain.Notice{}, errors.New("公告标题和内容不能为空")
@@ -236,6 +237,9 @@ func (s *Store) CreateNotice(userID int64, title, content, level string, pinned,
 	}
 	if len([]rune(title)) > 160 || len([]rune(content)) > 10000 || containsControl(title) || containsControl(content) {
 		return domain.Notice{}, errors.New("公告标题或内容过长")
+	}
+	if err := validateWebURL(linkURL, false); err != nil {
+		return domain.Notice{}, errors.New("公告链接无效")
 	}
 	if level != "info" && level != "success" && level != "warning" && level != "error" {
 		return domain.Notice{}, errors.New("公告级别无效")
@@ -253,7 +257,7 @@ func (s *Store) CreateNotice(userID int64, title, content, level string, pinned,
 		return domain.Notice{}, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO notices (title, content, level, pinned, enabled, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, title, content, level, p, e, userID, now, now)
+	res, err := tx.Exec(`INSERT INTO notices (title, content, link_url, level, pinned, enabled, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, title, content, linkURL, level, p, e, userID, now, now)
 	if err != nil {
 		return domain.Notice{}, err
 	}
@@ -279,13 +283,14 @@ func (s *Store) GetNotice(id int64) (domain.Notice, error) {
 }
 
 func getNotice(queryer rowQueryer, id int64) (domain.Notice, error) {
-	row := queryer.QueryRow(`SELECT id, title, content, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE id = ?`, id)
+	row := queryer.QueryRow(`SELECT id, title, content, link_url, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE id = ?`, id)
 	return scanNotice(row)
 }
 
-func (s *Store) UpdateNotice(actorID, id int64, title, content, level string, pinned, enabled bool) (domain.Notice, error) {
+func (s *Store) UpdateNotice(actorID, id int64, title, content, linkURL, level string, pinned, enabled bool) (domain.Notice, error) {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
+	linkURL = strings.TrimSpace(linkURL)
 	level = strings.TrimSpace(level)
 	if title == "" || content == "" {
 		return domain.Notice{}, errors.New("公告标题和内容不能为空")
@@ -295,6 +300,9 @@ func (s *Store) UpdateNotice(actorID, id int64, title, content, level string, pi
 	}
 	if len([]rune(title)) > 160 || len([]rune(content)) > 10000 || containsControl(title) || containsControl(content) {
 		return domain.Notice{}, errors.New("公告标题或内容过长")
+	}
+	if err := validateWebURL(linkURL, false); err != nil {
+		return domain.Notice{}, errors.New("公告链接无效")
 	}
 	if level != "info" && level != "success" && level != "warning" && level != "error" {
 		return domain.Notice{}, errors.New("公告级别无效")
@@ -312,7 +320,7 @@ func (s *Store) UpdateNotice(actorID, id int64, title, content, level string, pi
 		return domain.Notice{}, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE notices SET title = ?, content = ?, level = ?, pinned = ?, enabled = ?, updated_at = ? WHERE id = ?`, title, content, level, p, e, now, id)
+	res, err := tx.Exec(`UPDATE notices SET title = ?, content = ?, link_url = ?, level = ?, pinned = ?, enabled = ?, updated_at = ? WHERE id = ?`, title, content, linkURL, level, p, e, now, id)
 	if err != nil {
 		return domain.Notice{}, err
 	}

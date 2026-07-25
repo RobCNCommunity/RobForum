@@ -24,6 +24,7 @@ import PostTagList from '@/components/PostTagList.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
+import BadgeGrid from '@/components/BadgeGrid.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const route = useRoute()
@@ -238,6 +239,7 @@ onMounted(load)
             <VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" /><MembershipBadge :active="profile.user.member_active" :tier-id="profile.user.membership_tier_id" />
           </div>
           <span class="rf-x-profile-handle">{{ profileHandle }}</span>
+          <div class="rf-x-profile-level"><span>LV.{{ profile.user.progress.level }}</span><strong>{{ profile.user.progress.level_name }}</strong><small>{{ profile.user.progress.experience }} 经验</small></div>
           <p v-if="profile.user.bio" class="rf-x-profile-bio">{{ profile.user.bio }}</p>
           <div class="rf-x-profile-details">
             <span v-if="formatJoinDate(profile.user.created_at)"><AppIcon name="calendar" size="18" />{{ formatJoinDate(profile.user.created_at) }}</span>
@@ -246,6 +248,7 @@ onMounted(load)
             <span><strong>{{ follow.following_count }}</strong> 正在关注</span>
             <span><strong>{{ follow.follower_count }}</strong> 关注者</span>
           </div>
+          <div v-if="profile.user.badges.length" class="rf-x-profile-badges"><span>成就徽章</span><BadgeGrid :badges="profile.user.badges" compact /></div>
         </div>
 
         <div v-if="blocked" class="rf-x-blocked-note">你已拉黑该用户，关注和私信功能已关闭。</div>
@@ -322,7 +325,7 @@ onMounted(load)
 .rf-x-profile-header > div { display: flex; min-width: 0; flex-direction: column; }
 .rf-x-profile-header strong { overflow: hidden; font-size: 20px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .rf-x-profile-header span { color: var(--rf-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.rf-x-round-button { display: inline-grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; border-radius: 50%; color: var(--rf-text); background: transparent; transition: background-color 150ms ease-out, transform 100ms ease-out; }
+.rf-x-round-button { display: inline-grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; border-radius: 50%; color: var(--rf-text); background: transparent; transition: background-color 150ms ease-out, transform 100ms ease-out; touch-action: manipulation; }
 .rf-x-round-button:hover { background: var(--rf-bg-hover); }
 .rf-x-round-button:active { transform: scale(.94); }
 .rf-x-round-button:disabled { cursor: not-allowed; opacity: .45; }
@@ -352,6 +355,12 @@ onMounted(load)
 .rf-x-profile-name { display: flex; min-width: 0; align-items: center; gap: 5px; }
 .rf-x-profile-name h1 { min-width: 0; margin: 0; overflow: hidden; font-size: 21px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .rf-x-profile-handle { display: block; color: var(--rf-muted); font-size: 14px; }
+.rf-x-profile-level { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.rf-x-profile-level span { padding: 2px 7px; border-radius: var(--rf-pill); color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--rf-bg)); font-size: 11px; font-weight: 800; }
+.rf-x-profile-level strong { font-size: 13px; }
+.rf-x-profile-level small { color: var(--rf-muted); font-size: 11px; }
+.rf-x-profile-badges { margin-top: 14px; }
+.rf-x-profile-badges > span { display: block; margin-bottom: 7px; color: var(--rf-muted); font-size: 12px; }
 .rf-x-profile-bio { margin: 14px 0 0; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rf-x-profile-details { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 13px; color: var(--rf-muted); font-size: 14px; }
 .rf-x-profile-details span { display: inline-flex; align-items: center; gap: 5px; }
@@ -416,8 +425,8 @@ onMounted(load)
   .rf-x-profile-actions { gap: 6px; }
   .rf-x-profile-copy { padding: 0 12px 15px; }
   .rf-x-profile-name h1 { font-size: 20px; }
-  .rf-x-outline-button, .rf-x-follow-button { min-height: 34px; padding-inline: 14px; font-size: 13px; }
-  .rf-x-outline-control { width: 34px; height: 34px; flex-basis: 34px; }
+  .rf-x-outline-button, .rf-x-follow-button { min-height: 44px; padding-inline: 14px; font-size: 13px; }
+  .rf-x-outline-control { width: 44px; height: 44px; flex-basis: 44px; }
   .rf-x-blocked-note { margin-inline: 12px; }
   .rf-x-post-row, .rf-x-resource-row { gap: 9px; padding: 12px 11px 9px; }
   .rf-x-post-meta { font-size: 13px; }

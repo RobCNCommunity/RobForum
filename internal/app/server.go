@@ -163,6 +163,8 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/v1/me/wallet", s.myWallet)
 		r.Get("/api/v1/me/membership", s.myMembership)
 		r.Post("/api/v1/me/membership/subscribe", s.subscribeMembership)
+		r.Get("/api/v1/me/checkin", s.myCheckin)
+		r.Post("/api/v1/me/checkin", s.createCheckin)
 		r.Post("/api/v1/me/wallet/top-ups", s.createWalletTopUp)
 		r.Post("/api/v1/me/wallet/redeem", s.redeemWalletCode)
 		r.Post("/api/v1/resources/{resourceID}/wallet-order", s.createWalletResourceOrder)

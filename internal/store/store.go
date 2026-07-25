@@ -175,6 +175,7 @@ func (s *Store) migrate() error {
 		{table: "conversation_members", name: "last_notified_at", def: "DATETIME(6) NULL"},
 		{table: "notifications", name: "conversation_id", def: "BIGINT NULL"},
 		{table: "comments", name: "parent_id", def: "BIGINT NULL"},
+		{table: "notices", name: "link_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn(column.table, column.name, column.def); err != nil {
 			return fmt.Errorf("migration column %s.%s failed: %w", column.table, column.name, err)
@@ -344,6 +345,9 @@ func (s *Store) ensureDefaults(adminEmail, adminPassword string) error {
 		if _, err = s.db.Exec(`INSERT IGNORE INTO users (email, password_hash, display_name, avatar_url, role, status, created_at, updated_at) VALUES (?, ?, ?, '', 'admin', 'active', ?, ?)`, adminEmail, string(hash), "社区管理员", now, now); err != nil {
 			return err
 		}
+	}
+	if err := s.ensureBadgeDefaults(now); err != nil {
+		return err
 	}
 	if err := s.EnsureCommunitySeeds(); err != nil {
 		return err
@@ -854,6 +858,9 @@ func (s *Store) RegisterUser(email, password, displayName, emailCode string, req
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
+		return domain.User{}, "", err
+	}
+	if _, err := awardBadgeTx(tx, id, "new_member", now); err != nil {
 		return domain.User{}, "", err
 	}
 	user, err := getUser(tx, id)
@@ -1441,6 +1448,15 @@ func (s *Store) createPostWithTagsAndMedia(userID, boardID int64, title, content
 	}
 	if err := insertPostTags(tx, id, normalizedTags); err != nil {
 		return domain.Post{}, err
+	}
+	var authoredCount int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM posts WHERE author_id = ? AND status IN ('published', 'pending')`, userID).Scan(&authoredCount); err != nil {
+		return domain.Post{}, err
+	}
+	if authoredCount >= 10 {
+		if _, err := awardBadgeTx(tx, userID, "creator_10", now); err != nil {
+			return domain.Post{}, err
+		}
 	}
 	item, err := getPostForModeration(tx, id)
 	if err != nil {

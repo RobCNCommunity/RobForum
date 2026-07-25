@@ -3,6 +3,7 @@ import { computed, type Component } from 'vue'
 import {
   ArrowLeft,
   ArrowRight,
+  Award,
   AtSign,
   BadgeCheck,
   Ban,
@@ -26,6 +27,7 @@ import {
   FileImage,
   FileText,
   Flag,
+  Flame,
   HandCoins,
   Heart,
   House,
@@ -70,6 +72,7 @@ const props = withDefaults(defineProps<{ name: string; size?: string | number; c
 
 const icons: Record<string, Component> = {
   add: Plus,
+  award: Award,
   announcement: Megaphone,
   arrow: ArrowRight,
   back: ArrowLeft,
@@ -88,6 +91,7 @@ const icons: Record<string, Component> = {
   eye: Eye,
   file: FileText,
   flag: Flag,
+  flame: Flame,
   github: CircleEllipsis,
   heart: Heart,
   home: House,

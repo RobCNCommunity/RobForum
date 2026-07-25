@@ -95,6 +95,7 @@ func (s *Server) createAdminNotice(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Title   string `json:"title"`
 		Content string `json:"content"`
+		LinkURL string `json:"link_url"`
 		Level   string `json:"level"`
 		Pinned  bool   `json:"pinned"`
 		Enabled bool   `json:"enabled"`
@@ -102,7 +103,7 @@ func (s *Server) createAdminNotice(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	item, err := s.store.CreateNotice(currentUser(r).ID, input.Title, input.Content, input.Level, input.Pinned, input.Enabled)
+	item, err := s.store.CreateNotice(currentUser(r).ID, input.Title, input.Content, input.LinkURL, input.Level, input.Pinned, input.Enabled)
 	if err != nil {
 		writeError(w, 400, "notice_create_failed", err.Error())
 		return
@@ -115,6 +116,7 @@ func (s *Server) updateAdminNotice(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Title   string `json:"title"`
 		Content string `json:"content"`
+		LinkURL string `json:"link_url"`
 		Level   string `json:"level"`
 		Pinned  bool   `json:"pinned"`
 		Enabled bool   `json:"enabled"`
@@ -122,7 +124,7 @@ func (s *Server) updateAdminNotice(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	item, err := s.store.UpdateNotice(currentUser(r).ID, id, input.Title, input.Content, input.Level, input.Pinned, input.Enabled)
+	item, err := s.store.UpdateNotice(currentUser(r).ID, id, input.Title, input.Content, input.LinkURL, input.Level, input.Pinned, input.Enabled)
 	if err != nil {
 		writeError(w, 400, "notice_update_failed", err.Error())
 		return

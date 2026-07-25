@@ -22,6 +22,8 @@ npm run build
 
 带类型检查的生产检查可使用 `npm run build:checked`。部署只上传 `frontend/dist/`，不要运行任何 Python 页面生成脚本。
 
+前端本地使用 MiSans 字体，字体文件来源于小米 MiSans，并通过 `misans@4.1.0` 的网页字体子集提供。使用 MiSans 即表示接受[《MiSans 字体知识产权许可协议》](https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf)。字体子集生成脚本的 Apache 2.0 许可证见 `frontend/public/fonts/misans/LICENSE`。
+
 ## 当前已实现
 
 - MySQL/MariaDB 生产存储和嵌入式迁移

@@ -197,10 +197,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .rf-mobile-actions > button strong { font-size: 15px; }
 .rf-mobile-actions > button small { overflow: hidden; color: var(--rf-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
-.verified-badge { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; overflow: hidden; border-radius: 50%; color: #fff; background: var(--primary); vertical-align: -2px; }
+.verified-badge { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; overflow: visible; border-radius: 50%; color: #fff; background: var(--primary); vertical-align: -2px; }
 .verified-badge--custom { overflow: visible; border-radius: 0; background: transparent; }
 .verified-badge img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.membership-badge { display: inline-flex; width: 17px; height: 17px; flex: 0 0 17px; align-items: center; justify-content: center; color: var(--membership-badge-color, #f59e0b); vertical-align: -3px; }
+.membership-badge { position: relative; display: inline-flex; width: 17px; height: 17px; flex: 0 0 17px; align-items: center; justify-content: center; padding: 0; color: var(--membership-badge-color, #f59e0b); background: transparent; vertical-align: -3px; }
+.verified-badge::before, .membership-badge::before { position: absolute; inset: -7px; content: ''; }
 .membership-badge--custom { width: 18px; height: 18px; flex-basis: 18px; }
 .membership-badge img { display: block; width: 100%; height: 100%; object-fit: contain; }
 
@@ -352,6 +353,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .rf-button-small { min-height: 32px; padding: 0 12px; font-size: 12px; }
 .rf-secondary-button:active, .rf-danger-button:active, .rf-icon-text-button:active { transform: scale(.97); }
 .rf-secondary-button:disabled, .rf-danger-button:disabled, .rf-icon-text-button:disabled { opacity: .45; cursor: not-allowed; }
+.rf-primary-button, .rf-secondary-button, .rf-danger-button, .rf-text-button, .rf-icon-button, .rf-icon-text-button, .rf-nav-item, .nut-button, button { touch-action: manipulation; }
 .rf-row-actions, .rf-filter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .rf-filter-actions { justify-content: flex-end; }
 
@@ -495,10 +497,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .rf-auth-brand { top: 14px; left: 18px; }
   .pro-card, .setting-card { padding: 16px 12px; }
   .rf-admin-list { margin-inline: -12px; }
-  .rf-admin-list-row { padding-inline: 12px; }
+  .rf-admin-list-row { flex-wrap: wrap; padding-inline: 12px; }
+  .rf-admin-list-row > .rf-row-actions { flex: 0 0 100%; }
   .rf-panel-heading h3 { font-size: 17px; }
   .rf-inline-note { margin-inline: 12px; }
-  .rf-form-actions .nut-button, .rf-form-actions .rf-primary-button { width: 100%; }
+  .rf-form-actions { width: 100%; align-items: stretch; }
+  .rf-form-actions > *, .rf-form-actions .nut-button, .rf-form-actions .rf-primary-button { width: 100%; min-height: 44px; }
+  .rf-row-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rf-row-actions > * { width: 100%; min-width: 0; min-height: 44px; }
+  .rf-button-small { min-height: 44px; padding-inline: 14px; }
+  .rf-icon-button { width: 44px; height: 44px; }
   .rf-test-row { grid-template-columns: 1fr; }
   .rf-choice-row { align-items: flex-start; flex-direction: column; gap: 11px; }
   .rf-review-row { padding-inline: 12px; }

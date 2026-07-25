@@ -24,18 +24,20 @@ type User struct {
 }
 
 type PublicUser struct {
-	ID                int64     `json:"id"`
-	DisplayName       string    `json:"display_name"`
-	AvatarURL         string    `json:"avatar_url"`
-	CoverURL          string    `json:"cover_url"`
-	Bio               string    `json:"bio"`
-	BlueVerified      bool      `json:"blue_verified"`
-	VerificationLabel string    `json:"verification_label,omitempty"`
-	MemberActive      bool      `json:"member_active"`
-	MembershipTierID  int64     `json:"membership_tier_id,omitempty"`
-	RobloxName        string    `json:"roblox_name,omitempty"`
-	RobloxVerified    bool      `json:"roblox_verified"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                int64        `json:"id"`
+	DisplayName       string       `json:"display_name"`
+	AvatarURL         string       `json:"avatar_url"`
+	CoverURL          string       `json:"cover_url"`
+	Bio               string       `json:"bio"`
+	BlueVerified      bool         `json:"blue_verified"`
+	VerificationLabel string       `json:"verification_label,omitempty"`
+	MemberActive      bool         `json:"member_active"`
+	MembershipTierID  int64        `json:"membership_tier_id,omitempty"`
+	RobloxName        string       `json:"roblox_name,omitempty"`
+	RobloxVerified    bool         `json:"roblox_verified"`
+	CreatedAt         time.Time    `json:"created_at"`
+	Progress          UserProgress `json:"progress"`
+	Badges            []Badge      `json:"badges"`
 }
 
 type UserProfile struct {
@@ -514,12 +516,51 @@ type Notice struct {
 	ID        int64     `json:"id"`
 	Title     string    `json:"title"`
 	Content   string    `json:"content"`
+	LinkURL   string    `json:"link_url"`
 	Level     string    `json:"level"`
 	Pinned    bool      `json:"pinned"`
 	Enabled   bool      `json:"enabled"`
 	CreatedBy int64     `json:"created_by,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Badge struct {
+	ID          int64     `json:"id"`
+	Slug        string    `json:"slug"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Icon        string    `json:"icon"`
+	Color       string    `json:"color"`
+	AwardedAt   time.Time `json:"awarded_at"`
+}
+
+type UserProgress struct {
+	Experience          int64  `json:"experience"`
+	TotalCheckins       int    `json:"total_checkins"`
+	CurrentStreak       int    `json:"current_streak"`
+	LongestStreak       int    `json:"longest_streak"`
+	LastCheckinDate     string `json:"last_checkin_date,omitempty"`
+	CheckedInToday      bool   `json:"checked_in_today"`
+	Level               int    `json:"level"`
+	LevelName           string `json:"level_name"`
+	LevelMinExperience  int64  `json:"level_min_experience"`
+	NextLevelExperience int64  `json:"next_level_experience"`
+	LevelProgress       int    `json:"level_progress"`
+}
+
+type CheckinRecord struct {
+	Date              string    `json:"date"`
+	ExperienceAwarded int       `json:"experience_awarded"`
+	Streak            int       `json:"streak"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type CheckinSummary struct {
+	Progress     UserProgress    `json:"progress"`
+	History      []CheckinRecord `json:"history"`
+	Badges       []Badge         `json:"badges"`
+	NewlyAwarded []Badge         `json:"newly_awarded"`
 }
 
 type WalletEntry struct {

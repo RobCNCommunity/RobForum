@@ -26,6 +26,7 @@ const sections = computed(() => [
     { key: `/users/${auth.user.id}`, label: '个人主页', icon: 'user' },
     { key: '/bookmarks', label: '收藏', icon: 'star' },
     { key: '/settings/profile', label: '资料设置', icon: 'settings' },
+    { key: '/check-in', label: '签到与资历', icon: 'calendar' },
     { key: '/membership', label: '会员中心', icon: 'crown' },
     { key: '/wallet', label: '钱包', icon: 'wallet' },
     ...(!auth.user.blue_verified ? [{ key: '/verification/apply', label: '蓝微认证', icon: 'check' }] : []),

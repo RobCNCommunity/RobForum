@@ -320,6 +320,9 @@ func (s *Store) OAuthLogin(providerKey, subject, email, displayName, avatarURL s
 			return domain.User{}, "", err
 		}
 	}
+	if _, err := awardBadgeTx(tx, userID, "new_member", now); err != nil {
+		return domain.User{}, "", err
+	}
 	user, err := getUser(tx, userID)
 	if err != nil {
 		return domain.User{}, "", err

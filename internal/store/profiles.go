@@ -109,9 +109,17 @@ func (s *Store) GetPublicUser(userID int64) (domain.PublicUser, error) {
 	var user domain.PublicUser
 	var blueVerified, memberActive, robloxVerified int
 	err := s.db.QueryRow(`SELECT id, display_name, avatar_url, cover_url, bio, blue_verified, verification_label, COALESCE(membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP() THEN membership_tier_id ELSE 0 END, roblox_name, roblox_verified, created_at FROM users WHERE id = ? AND status = 'active' AND profile_status = 'active'`, userID).Scan(&user.ID, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &blueVerified, &user.VerificationLabel, &memberActive, &user.MembershipTierID, &user.RobloxName, &robloxVerified, &user.CreatedAt)
+	if err != nil {
+		return user, err
+	}
 	user.BlueVerified = blueVerified != 0
 	user.MemberActive = memberActive != 0
 	user.RobloxVerified = robloxVerified != 0
+	user.Progress, err = s.GetUserProgress(userID)
+	if err != nil {
+		return user, err
+	}
+	user.Badges, err = s.ListUserBadges(userID)
 	return user, err
 }
 
