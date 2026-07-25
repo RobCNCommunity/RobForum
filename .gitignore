@@ -37,6 +37,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.qa-markdown-evidence/
+frontend/.omo/
 
 # Packaged artifacts
 *.tgz
