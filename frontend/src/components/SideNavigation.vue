@@ -29,6 +29,7 @@ const sections = computed(() => [
     { key: '/check-in', label: '签到与资历', icon: 'calendar' },
     { key: '/membership', label: '会员中心', icon: 'crown' },
     { key: '/wallet', label: '钱包', icon: 'wallet' },
+    { key: '/avatar-frames', label: '头像框市场', icon: 'shop' },
     ...(!auth.user.blue_verified ? [{ key: '/verification/apply', label: '蓝微认证', icon: 'check' }] : []),
   ]}] : []),
   ...(auth.isAdmin ? [{ label: '管理', items: [
@@ -41,6 +42,7 @@ const sections = computed(() => [
     { key: '/admin/verifications', label: '认证审核', icon: 'badge' },
     { key: '/admin/users', label: '用户管理', icon: 'members' },
     { key: '/admin/posts', label: '内容审核', icon: 'document' },
+    { key: '/admin/avatar-frames', label: '头像框管理', icon: 'badge' },
   ]}] : []),
 ])
 

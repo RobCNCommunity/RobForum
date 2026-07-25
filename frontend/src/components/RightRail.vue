@@ -66,7 +66,7 @@ onMounted(load)
       <h2 id="rail-users-title">值得关注</h2>
       <div v-if="loading" class="rf-rail-skeleton"><nut-skeleton v-for="n in 3" :key="n" animated avatar row="1" height="14px" /></div>
       <button v-for="user in users" v-else :key="user.id" type="button" class="rf-user-suggestion" @click="viewUser(user.id)">
-        <UserAvatar :src="user.avatar_url" :name="user.display_name" :size="40" />
+        <UserAvatar :src="user.avatar_url" :name="user.display_name" :size="40" :frame="user.avatar_frame" />
         <span>
           <strong>{{ user.display_name }}<VerifiedBadge :verified="user.blue_verified" :label="user.verification_label" /><MembershipBadge :active="user.member_active" :tier-id="user.membership_tier_id" /></strong>
           <small>{{ user.post_count }} 帖子 · 热度 {{ formatHeat(user.hot_score) }}</small>

@@ -81,6 +81,20 @@ func (s *Store) SearchUsersPage(query string, limit, offset int, hotOnly bool) (
 	if hasMore {
 		result = result[:limit]
 	}
+	if err := rows.Close(); err != nil {
+		return domain.UserSearchPage{}, err
+	}
+	userIDs := make([]int64, 0, len(result))
+	for _, item := range result {
+		userIDs = append(userIDs, item.ID)
+	}
+	frames, err := equippedAvatarFrames(s.db, userIDs)
+	if err != nil {
+		return domain.UserSearchPage{}, err
+	}
+	for index := range result {
+		result[index].AvatarFrame = frames[result[index].ID]
+	}
 	return domain.UserSearchPage{Items: result, NextOffset: offset + len(result), HasMore: hasMore}, nil
 }
 

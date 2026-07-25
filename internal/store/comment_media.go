@@ -118,7 +118,13 @@ func attachCommentMedia(queryer sqlQueryer, comments []domain.Comment) error {
 		item.URL = "/api/v1/media/comments/" + storedName
 		comments[index].Media = append(comments[index].Media, item)
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return attachAvatarFramesToComments(queryer, comments)
 }
 
 func (s *Store) CommentMediaAccess(storedName string, viewerID int64, isAdmin bool) (domain.PostMedia, bool, bool, error) {

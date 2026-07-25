@@ -901,6 +901,9 @@ func getUser(queryer rowQueryer, id int64) (domain.User, error) {
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
 	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
+	if err == nil {
+		user.AvatarFrame, err = attachAvatarFrameToUser(queryer, user.ID)
+	}
 	return user, err
 }
 
@@ -923,6 +926,9 @@ func (s *Store) GetUserByEmail(email string) (domain.User, error) {
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
 	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
+	if err == nil {
+		user.AvatarFrame, err = attachAvatarFrameToUser(s.db, user.ID)
+	}
 	return user, err
 }
 
@@ -951,6 +957,11 @@ func (s *Store) VerifyPassword(email, password string) (domain.User, error) {
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
 	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
+	avatarFrame, err := attachAvatarFrameToUser(s.db, user.ID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	user.AvatarFrame = avatarFrame
 	return user, nil
 }
 
@@ -986,6 +997,10 @@ func (s *Store) UserBySession(token string) (domain.User, error) {
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
 	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
+	user.AvatarFrame, err = attachAvatarFrameToUser(s.db, user.ID)
+	if err != nil {
+		return domain.User{}, err
+	}
 	return user, nil
 }
 
@@ -1368,6 +1383,9 @@ func getPost(queryer rowQueryer, id int64) (domain.Post, error) {
 	item.AuthorMember = authorMember != 0
 	item.Pinned = pinned != 0
 	item.Featured = featured != 0
+	if err == nil {
+		item.AuthorAvatarFrame, err = attachAvatarFrameToUser(queryer, item.AuthorID)
+	}
 	return item, err
 }
 
@@ -1599,6 +1617,9 @@ func getComment(queryer sqlQueryer, id int64) (domain.Comment, error) {
 	item.AuthorMember = authorMember != 0
 	if err == nil {
 		item.Media, err = getCommentMedia(queryer, id)
+	}
+	if err == nil {
+		item.AuthorAvatarFrame, err = attachAvatarFrameToUser(queryer, item.AuthorID)
 	}
 	return item, err
 }

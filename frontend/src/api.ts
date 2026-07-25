@@ -63,6 +63,28 @@ export interface SiteSettings {
   updated_at: string
 }
 
+export interface AvatarFrame {
+  id: number
+  name: string
+  description: string
+  style: 'ring' | 'double' | 'glow' | 'pixel' | 'halo'
+  primary_color: string
+  secondary_color: string
+  price_cents: number
+  allowed_regular: boolean
+  allowed_member: boolean
+  allowed_admin: boolean
+  enabled: boolean
+  sort_order: number
+  sales_count: number
+  owned: boolean
+  equipped: boolean
+  can_use: boolean
+  purchased_at?: string
+  created_at: string
+  updated_at: string
+}
+
 export interface User {
   id: number
   email: string
@@ -78,6 +100,7 @@ export interface User {
   membership_tier_id?: number
   membership_started_at?: string
   membership_expires_at?: string
+  avatar_frame?: AvatarFrame
   roblox_name?: string
   roblox_id?: string
   roblox_verified: boolean
@@ -91,12 +114,12 @@ export interface CheckinSummary { progress: UserProgress; history: CheckinRecord
 
 export interface Board { id: number; slug: string; name: string; description: string; icon: string; post_count: number }
 export interface PostMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
-export interface Post { id: number; board_id: number; board_name: string; author_id: number; author_name: string; author_avatar: string; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; title: string; content: string; status: string; pinned: boolean; featured: boolean; views: number; comment_count: number; like_count: number; repost_count: number; liked: boolean; bookmarked: boolean; reposted: boolean; tags?: string[]; media?: PostMedia[]; created_at: string; updated_at: string }
-export interface Comment { id: number; post_id: number; parent_id?: number; author_id: number; author_name: string; author_avatar: string; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; content: string; media?: PostMedia[]; like_count: number; liked: boolean; created_at: string }
+export interface Post { id: number; board_id: number; board_name: string; author_id: number; author_name: string; author_avatar: string; author_avatar_frame?: AvatarFrame; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; title: string; content: string; status: string; pinned: boolean; featured: boolean; views: number; comment_count: number; like_count: number; repost_count: number; liked: boolean; bookmarked: boolean; reposted: boolean; tags?: string[]; media?: PostMedia[]; created_at: string; updated_at: string }
+export interface Comment { id: number; post_id: number; parent_id?: number; author_id: number; author_name: string; author_avatar: string; author_avatar_frame?: AvatarFrame; author_verified: boolean; author_verification_label?: string; author_member: boolean; author_membership_tier_id?: number; content: string; media?: PostMedia[]; like_count: number; liked: boolean; created_at: string }
 export interface ResourceFile { id: number; resource_id: number; original_name: string; mime_type: string; size_bytes: number; sha256: string; created_at: string }
 export interface ResourceMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
 export interface Resource { id: number; creator_id: number; creator_name: string; creator_verified: boolean; creator_verification_label?: string; creator_member: boolean; creator_membership_tier_id?: number; title: string; description: string; game: string; version: string; resource_type: string; price_cents: number; status: string; review_reason?: string; download_count: number; sales_count: number; file?: ResourceFile; media?: ResourceMedia[]; created_at: string; updated_at: string }
-export interface PublicUser { id: number; display_name: string; avatar_url: string; cover_url: string; bio: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; roblox_name?: string; roblox_verified: boolean; created_at: string; progress: UserProgress; badges: Badge[] }
+export interface PublicUser { id: number; display_name: string; avatar_url: string; cover_url: string; bio: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; avatar_frame?: AvatarFrame; roblox_name?: string; roblox_verified: boolean; created_at: string; progress: UserProgress; badges: Badge[] }
 export interface AdminUser { id: number; email: string; display_name: string; avatar_url: string; role: string; status: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; membership_expires_at?: string; post_count: number; comment_count: number; resource_count: number; created_at: string; updated_at: string }
 export interface UserProfile { user: PublicUser; posts: Post[]; resources: Resource[]; follower_count: number; following_count: number; following: boolean }
 export interface UserSearchResult extends PublicUser { post_count: number; resource_count: number; hot_score: number }
@@ -192,6 +215,13 @@ function data<T>(response: { data: { data: T } }): T { return response.data.data
 
 export async function fetchSiteSettings() { return data<SiteSettings>(await api.get('/site/settings')) }
 export async function fetchMembershipConfig() { return data<MembershipSettings>(await api.get('/membership/config')) }
+export async function fetchAvatarFrames() { return data<AvatarFrame[]>(await api.get('/avatar-frames')) }
+export async function purchaseAvatarFrame(id: number) { return data<AvatarFrame>(await api.post(`/avatar-frames/${id}/purchase`)) }
+export async function equipAvatarFrame(frameId: number) { return data<{ avatar_frame: AvatarFrame | null }>(await api.put('/me/avatar-frame', { frame_id: frameId })) }
+export async function fetchAdminAvatarFrames() { return data<AvatarFrame[]>(await api.get('/admin/avatar-frames')) }
+export async function createAdminAvatarFrame(input: Omit<AvatarFrame, 'id' | 'sales_count' | 'owned' | 'equipped' | 'can_use' | 'purchased_at' | 'created_at' | 'updated_at'>) { return data<AvatarFrame>(await api.post('/admin/avatar-frames', input)) }
+export async function updateAdminAvatarFrame(id: number, input: Omit<AvatarFrame, 'id' | 'sales_count' | 'owned' | 'equipped' | 'can_use' | 'purchased_at' | 'created_at' | 'updated_at'>) { return data<AvatarFrame>(await api.put(`/admin/avatar-frames/${id}`, input)) }
+export async function deleteAdminAvatarFrame(id: number) { return data<{ disabled: boolean }>(await api.delete(`/admin/avatar-frames/${id}`)) }
 export async function fetchPublicCaptcha() { return data<CaptchaConfig>(await api.get('/captcha/config')) }
 export async function fetchPublicOAuth() { return data<PublicOAuthConfig>(await api.get('/oauth/config')) }
 export async function fetchBoards() { return data<Board[]>(await api.get('/boards')) }

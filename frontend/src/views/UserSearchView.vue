@@ -101,7 +101,7 @@ onMounted(loadHotUsers)
 
         <div v-else-if="visibleUsers.length" class="rf-explore-list">
           <RouterLink v-for="user in visibleUsers" :key="user.id" :to="`/users/${user.id}`" class="rf-explore-user">
-            <UserAvatar :src="user.avatar_url" :name="user.display_name" :size="48" />
+            <UserAvatar :src="user.avatar_url" :name="user.display_name" :size="48" :frame="user.avatar_frame" />
             <span class="rf-explore-copy">
               <span class="rf-explore-name">
                 <strong>{{ user.display_name }}</strong>

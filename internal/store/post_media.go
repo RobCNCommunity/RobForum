@@ -119,5 +119,8 @@ func attachPostMedia(queryer sqlQueryer, posts []domain.Post) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	return attachPostTags(queryer, posts)
+	if err := attachPostTags(queryer, posts); err != nil {
+		return err
+	}
+	return attachAvatarFramesToPosts(queryer, posts)
 }

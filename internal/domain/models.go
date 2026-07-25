@@ -3,24 +3,25 @@ package domain
 import "time"
 
 type User struct {
-	ID                  int64      `json:"id"`
-	Email               string     `json:"email"`
-	DisplayName         string     `json:"display_name"`
-	AvatarURL           string     `json:"avatar_url"`
-	CoverURL            string     `json:"cover_url"`
-	Bio                 string     `json:"bio"`
-	Role                string     `json:"role"`
-	Status              string     `json:"status"`
-	BlueVerified        bool       `json:"blue_verified"`
-	VerificationLabel   string     `json:"verification_label,omitempty"`
-	MemberActive        bool       `json:"member_active"`
-	MembershipTierID    int64      `json:"membership_tier_id,omitempty"`
-	MembershipStartedAt *time.Time `json:"membership_started_at,omitempty"`
-	MembershipExpiresAt *time.Time `json:"membership_expires_at,omitempty"`
-	RobloxName          string     `json:"roblox_name,omitempty"`
-	RobloxID            string     `json:"roblox_id,omitempty"`
-	RobloxVerified      bool       `json:"roblox_verified"`
-	CreatedAt           time.Time  `json:"created_at"`
+	ID                  int64        `json:"id"`
+	Email               string       `json:"email"`
+	DisplayName         string       `json:"display_name"`
+	AvatarURL           string       `json:"avatar_url"`
+	CoverURL            string       `json:"cover_url"`
+	Bio                 string       `json:"bio"`
+	Role                string       `json:"role"`
+	Status              string       `json:"status"`
+	BlueVerified        bool         `json:"blue_verified"`
+	VerificationLabel   string       `json:"verification_label,omitempty"`
+	MemberActive        bool         `json:"member_active"`
+	MembershipTierID    int64        `json:"membership_tier_id,omitempty"`
+	MembershipStartedAt *time.Time   `json:"membership_started_at,omitempty"`
+	MembershipExpiresAt *time.Time   `json:"membership_expires_at,omitempty"`
+	AvatarFrame         *AvatarFrame `json:"avatar_frame,omitempty"`
+	RobloxName          string       `json:"roblox_name,omitempty"`
+	RobloxID            string       `json:"roblox_id,omitempty"`
+	RobloxVerified      bool         `json:"roblox_verified"`
+	CreatedAt           time.Time    `json:"created_at"`
 }
 
 type PublicUser struct {
@@ -33,6 +34,7 @@ type PublicUser struct {
 	VerificationLabel string       `json:"verification_label,omitempty"`
 	MemberActive      bool         `json:"member_active"`
 	MembershipTierID  int64        `json:"membership_tier_id,omitempty"`
+	AvatarFrame       *AvatarFrame `json:"avatar_frame,omitempty"`
 	RobloxName        string       `json:"roblox_name,omitempty"`
 	RobloxVerified    bool         `json:"roblox_verified"`
 	CreatedAt         time.Time    `json:"created_at"`
@@ -141,6 +143,28 @@ type MembershipSummary struct {
 	Orders         []MembershipOrder  `json:"orders"`
 }
 
+type AvatarFrame struct {
+	ID             int64      `json:"id"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description"`
+	Style          string     `json:"style"`
+	PrimaryColor   string     `json:"primary_color"`
+	SecondaryColor string     `json:"secondary_color"`
+	PriceCents     int64      `json:"price_cents"`
+	AllowedRegular bool       `json:"allowed_regular"`
+	AllowedMember  bool       `json:"allowed_member"`
+	AllowedAdmin   bool       `json:"allowed_admin"`
+	Enabled        bool       `json:"enabled"`
+	SortOrder      int        `json:"sort_order"`
+	SalesCount     int64      `json:"sales_count"`
+	Owned          bool       `json:"owned"`
+	Equipped       bool       `json:"equipped"`
+	CanUse         bool       `json:"can_use"`
+	PurchasedAt    *time.Time `json:"purchased_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
 type AdminUser struct {
 	ID                  int64      `json:"id"`
 	Email               string     `json:"email"`
@@ -212,32 +236,33 @@ type Board struct {
 }
 
 type Post struct {
-	ID                      int64       `json:"id"`
-	BoardID                 int64       `json:"board_id"`
-	BoardName               string      `json:"board_name"`
-	AuthorID                int64       `json:"author_id"`
-	AuthorName              string      `json:"author_name"`
-	AuthorAvatar            string      `json:"author_avatar"`
-	AuthorVerified          bool        `json:"author_verified"`
-	AuthorVerificationLabel string      `json:"author_verification_label,omitempty"`
-	AuthorMember            bool        `json:"author_member"`
-	AuthorMembershipTierID  int64       `json:"author_membership_tier_id,omitempty"`
-	Title                   string      `json:"title"`
-	Content                 string      `json:"content"`
-	Status                  string      `json:"status"`
-	Pinned                  bool        `json:"pinned"`
-	Featured                bool        `json:"featured"`
-	Views                   int64       `json:"views"`
-	CommentCount            int64       `json:"comment_count"`
-	LikeCount               int64       `json:"like_count"`
-	RepostCount             int64       `json:"repost_count"`
-	Liked                   bool        `json:"liked"`
-	Bookmarked              bool        `json:"bookmarked"`
-	Reposted                bool        `json:"reposted"`
-	Tags                    []string    `json:"tags,omitempty"`
-	Media                   []PostMedia `json:"media,omitempty"`
-	CreatedAt               time.Time   `json:"created_at"`
-	UpdatedAt               time.Time   `json:"updated_at"`
+	ID                      int64        `json:"id"`
+	BoardID                 int64        `json:"board_id"`
+	BoardName               string       `json:"board_name"`
+	AuthorID                int64        `json:"author_id"`
+	AuthorName              string       `json:"author_name"`
+	AuthorAvatar            string       `json:"author_avatar"`
+	AuthorAvatarFrame       *AvatarFrame `json:"author_avatar_frame,omitempty"`
+	AuthorVerified          bool         `json:"author_verified"`
+	AuthorVerificationLabel string       `json:"author_verification_label,omitempty"`
+	AuthorMember            bool         `json:"author_member"`
+	AuthorMembershipTierID  int64        `json:"author_membership_tier_id,omitempty"`
+	Title                   string       `json:"title"`
+	Content                 string       `json:"content"`
+	Status                  string       `json:"status"`
+	Pinned                  bool         `json:"pinned"`
+	Featured                bool         `json:"featured"`
+	Views                   int64        `json:"views"`
+	CommentCount            int64        `json:"comment_count"`
+	LikeCount               int64        `json:"like_count"`
+	RepostCount             int64        `json:"repost_count"`
+	Liked                   bool         `json:"liked"`
+	Bookmarked              bool         `json:"bookmarked"`
+	Reposted                bool         `json:"reposted"`
+	Tags                    []string     `json:"tags,omitempty"`
+	Media                   []PostMedia  `json:"media,omitempty"`
+	CreatedAt               time.Time    `json:"created_at"`
+	UpdatedAt               time.Time    `json:"updated_at"`
 }
 
 type PostMedia struct {
@@ -250,21 +275,22 @@ type PostMedia struct {
 }
 
 type Comment struct {
-	ID                      int64       `json:"id"`
-	PostID                  int64       `json:"post_id"`
-	ParentID                *int64      `json:"parent_id,omitempty"`
-	AuthorID                int64       `json:"author_id"`
-	AuthorName              string      `json:"author_name"`
-	AuthorAvatar            string      `json:"author_avatar"`
-	AuthorVerified          bool        `json:"author_verified"`
-	AuthorVerificationLabel string      `json:"author_verification_label,omitempty"`
-	AuthorMember            bool        `json:"author_member"`
-	AuthorMembershipTierID  int64       `json:"author_membership_tier_id,omitempty"`
-	Content                 string      `json:"content"`
-	Media                   []PostMedia `json:"media,omitempty"`
-	LikeCount               int64       `json:"like_count"`
-	Liked                   bool        `json:"liked"`
-	CreatedAt               time.Time   `json:"created_at"`
+	ID                      int64        `json:"id"`
+	PostID                  int64        `json:"post_id"`
+	ParentID                *int64       `json:"parent_id,omitempty"`
+	AuthorID                int64        `json:"author_id"`
+	AuthorName              string       `json:"author_name"`
+	AuthorAvatar            string       `json:"author_avatar"`
+	AuthorAvatarFrame       *AvatarFrame `json:"author_avatar_frame,omitempty"`
+	AuthorVerified          bool         `json:"author_verified"`
+	AuthorVerificationLabel string       `json:"author_verification_label,omitempty"`
+	AuthorMember            bool         `json:"author_member"`
+	AuthorMembershipTierID  int64        `json:"author_membership_tier_id,omitempty"`
+	Content                 string       `json:"content"`
+	Media                   []PostMedia  `json:"media,omitempty"`
+	LikeCount               int64        `json:"like_count"`
+	Liked                   bool         `json:"liked"`
+	CreatedAt               time.Time    `json:"created_at"`
 }
 
 type FollowStatus struct {

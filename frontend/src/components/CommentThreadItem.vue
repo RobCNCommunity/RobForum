@@ -62,7 +62,7 @@ function runMenuAction(action: 'delete' | 'report') {
   <div class="rf-comment-node" :class="{ compact, deep: depth >= 3, replying: replyingToId === item.id }">
     <article :id="`reply-${item.id}`" class="rf-comment-row">
       <RouterLink :to="`/users/${item.author_id}`" :aria-label="`查看 ${item.author_name} 的个人主页`">
-        <UserAvatar :src="item.author_avatar" :name="item.author_name" :size="compact ? 34 : 40" />
+        <UserAvatar :src="item.author_avatar" :name="item.author_name" :size="compact ? 34 : 40" :frame="item.author_avatar_frame" />
       </RouterLink>
       <div class="rf-comment-body">
         <header>

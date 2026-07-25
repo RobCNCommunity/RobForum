@@ -225,7 +225,7 @@ onBeforeUnmount(stopAdTimer)
     </form>
 
     <section v-if="auth.user && isHome" class="rf-composer">
-      <UserAvatar :src="auth.user.avatar_url" :name="auth.user.display_name" :size="42" />
+      <UserAvatar :src="auth.user.avatar_url" :name="auth.user.display_name" :size="42" :frame="auth.user.avatar_frame" />
       <RouterLink to="/posts/new">有什么新鲜事？</RouterLink>
       <nut-button type="primary" size="small" @click="router.push('/posts/new')">发布</nut-button>
     </section>

@@ -15,19 +15,26 @@ export function normalizeCodeLanguage(value?: string): string {
 }
 
 export function highlightCodeBlocks(root: DocumentFragment): void {
-  for (const code of root.querySelectorAll<HTMLElement>('pre > code[data-language]')) {
+  for (const code of root.querySelectorAll<HTMLElement>('pre > code')) {
     const specifiedLanguage = normalizeCodeLanguage(code.dataset.language)
     const container = code.parentElement
-    if (!specifiedLanguage || !container) continue
+    if (!container) continue
+    if (specifiedLanguage === 'mermaid') {
+      container.dataset.language = 'mermaid'
+      continue
+    }
 
-    container.dataset.language = specifiedLanguage
-    if (!highlight.getLanguage(specifiedLanguage)) continue
+    if (specifiedLanguage && !highlight.getLanguage(specifiedLanguage)) {
+      container.dataset.language = specifiedLanguage
+      code.classList.add('hljs', `language-${specifiedLanguage}`)
+      continue
+    }
 
-    const result = highlight.highlight(code.textContent || '', {
-      language: specifiedLanguage,
-      ignoreIllegals: true,
-    })
-    const canonicalLanguage = normalizeCodeLanguage(result.language) || specifiedLanguage
+    const result = specifiedLanguage
+      ? highlight.highlight(code.textContent || '', { language: specifiedLanguage, ignoreIllegals: true })
+      : highlight.highlightAuto(code.textContent || '')
+    const canonicalLanguage = normalizeCodeLanguage(result.language) || specifiedLanguage || 'text'
+    container.dataset.language = canonicalLanguage
     code.innerHTML = result.value
     code.classList.add('hljs', `language-${canonicalLanguage}`)
   }

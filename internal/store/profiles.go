@@ -115,6 +115,10 @@ func (s *Store) GetPublicUser(userID int64) (domain.PublicUser, error) {
 	user.BlueVerified = blueVerified != 0
 	user.MemberActive = memberActive != 0
 	user.RobloxVerified = robloxVerified != 0
+	user.AvatarFrame, err = attachAvatarFrameToUser(s.db, userID)
+	if err != nil {
+		return user, err
+	}
 	user.Progress, err = s.GetUserProgress(userID)
 	if err != nil {
 		return user, err

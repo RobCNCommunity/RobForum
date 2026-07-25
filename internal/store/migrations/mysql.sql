@@ -464,6 +464,45 @@ CREATE TABLE IF NOT EXISTS wallet_ledgers (
   CONSTRAINT fk_wallet_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS avatar_frames (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(80) NOT NULL,
+  description VARCHAR(240) NOT NULL DEFAULT '',
+  style VARCHAR(24) NOT NULL DEFAULT 'ring',
+  primary_color VARCHAR(16) NOT NULL DEFAULT '#1d9bf0',
+  secondary_color VARCHAR(16) NOT NULL DEFAULT '#8b5cf6',
+  price_cents BIGINT NOT NULL DEFAULT 0,
+  allowed_regular TINYINT(1) NOT NULL DEFAULT 1,
+  allowed_member TINYINT(1) NOT NULL DEFAULT 1,
+  allowed_admin TINYINT(1) NOT NULL DEFAULT 1,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  sort_order INT NOT NULL DEFAULT 0,
+  sales_count BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_avatar_frames_catalog (enabled, sort_order, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_avatar_frames (
+  user_id BIGINT NOT NULL,
+  frame_id BIGINT NOT NULL,
+  price_paid_cents BIGINT NOT NULL,
+  purchased_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (user_id, frame_id),
+  INDEX idx_user_avatar_frames_frame (frame_id, purchased_at),
+  CONSTRAINT fk_user_avatar_frames_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_user_avatar_frames_frame FOREIGN KEY (frame_id) REFERENCES avatar_frames(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_avatar_frame_equipment (
+  user_id BIGINT NOT NULL PRIMARY KEY,
+  frame_id BIGINT NOT NULL,
+  equipped_at DATETIME(6) NOT NULL,
+  INDEX idx_avatar_frame_equipment_frame (frame_id),
+  CONSTRAINT fk_avatar_frame_equipment_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_avatar_frame_equipment_frame FOREIGN KEY (frame_id) REFERENCES avatar_frames(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS membership_orders (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   order_no VARCHAR(64) NOT NULL UNIQUE,

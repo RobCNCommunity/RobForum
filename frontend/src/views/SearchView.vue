@@ -147,7 +147,7 @@ watch(
           <section v-if="(activeTab === 'all' || activeTab === 'posts') && results.posts.length" class="rf-search-group" aria-labelledby="search-posts-title">
             <header><h1 id="search-posts-title">帖子</h1><span>{{ results.posts.length }} 条结果</span></header>
             <RouterLink v-for="post in results.posts" :key="post.id" :to="`/posts/${post.id}`" class="rf-search-post">
-              <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" />
+              <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" :frame="post.author_avatar_frame" />
               <div class="rf-search-copy">
                 <span class="rf-search-author"><strong>{{ post.author_name }}</strong><VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /><MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" /><small>@user_{{ post.author_id }}</small></span>
                 <span class="rf-search-post-meta"><em>{{ post.board_name }}</em></span>
@@ -177,7 +177,7 @@ watch(
           <section v-if="(activeTab === 'all' || activeTab === 'users') && results.users.length" class="rf-search-group" aria-labelledby="search-users-title">
             <header><h1 id="search-users-title">用户</h1><span>{{ results.users.length }} 位用户</span></header>
             <RouterLink v-for="user in results.users" :key="user.id" :to="`/users/${user.id}`" class="rf-search-user">
-              <UserAvatar :src="user.avatar_url" :name="user.display_name" :size="48" />
+              <UserAvatar :src="user.avatar_url" :name="user.display_name" :size="48" :frame="user.avatar_frame" />
               <span class="rf-search-copy">
                 <span class="rf-search-author"><strong>{{ user.display_name }}</strong><VerifiedBadge :verified="user.blue_verified" :label="user.verification_label" /><MembershipBadge :active="user.member_active" :tier-id="user.membership_tier_id" /></span>
                 <small>{{ handle(user) }}</small>

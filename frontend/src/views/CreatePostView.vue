@@ -214,42 +214,44 @@ onBeforeUnmount(() => {
         <button type="button" class="rf-mobile-publish" :disabled="loading || preparingMedia || !form.board_id || !form.content.trim()" @click="submit">{{ loading ? '发布中' : '发布' }}</button>
       </header>
 
-      <label class="rf-mobile-board">
-        <AppIcon name="category" size="17" />
-        <select v-model="form.board_id" required aria-label="选择板块">
-          <option :value="undefined" disabled>选择发布板块</option>
-          <option v-for="board in boards" :key="board.id" :value="board.id">{{ board.name }}</option>
-        </select>
-        <AppIcon name="chevron" size="16" />
-      </label>
+      <div class="rf-mobile-composer-scroll">
+        <label class="rf-mobile-board">
+          <AppIcon name="category" size="17" />
+          <select v-model="form.board_id" required aria-label="选择板块">
+            <option :value="undefined" disabled>选择发布板块</option>
+            <option v-for="board in boards" :key="board.id" :value="board.id">{{ board.name }}</option>
+          </select>
+          <AppIcon name="chevron" size="16" />
+        </label>
 
-      <QuotedPostContext @loaded="prefillQuote" />
+        <QuotedPostContext @loaded="prefillQuote" />
 
-      <div class="rf-mobile-editor">
-        <UserAvatar :src="auth.user?.avatar_url" :name="auth.user?.display_name" :size="40" />
-        <div>
-          <input v-model="form.title" maxlength="180" placeholder="添加标题（可选）" aria-label="帖子标题，可选" />
-          <div class="rf-markdown-mode" role="tablist" aria-label="正文模式">
-            <button type="button" role="tab" data-editor-mode="edit" :tabindex="editorMode === 'edit' ? 0 : -1" :aria-selected="editorMode === 'edit'" :class="{ active: editorMode === 'edit' }" @click="editorMode = 'edit'" @keydown="handleEditorTabKeydown"><AppIcon name="edit" size="15" />编辑</button>
-            <button type="button" role="tab" data-editor-mode="preview" :tabindex="editorMode === 'preview' ? 0 : -1" :aria-selected="editorMode === 'preview'" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'" @keydown="handleEditorTabKeydown"><AppIcon name="eye" size="15" />预览</button>
-          </div>
-          <textarea v-show="editorMode === 'edit'" v-model="form.content" rows="9" maxlength="50000" autofocus placeholder="分享你的想法" aria-label="帖子正文，支持 Markdown" />
-          <div v-show="editorMode === 'preview'" class="rf-markdown-preview">
-            <MarkdownContent v-if="form.content.trim()" :source="form.content" />
-            <span v-else>暂无内容</span>
+        <div class="rf-mobile-editor">
+          <UserAvatar :src="auth.user?.avatar_url" :name="auth.user?.display_name" :size="40" :frame="auth.user?.avatar_frame" />
+          <div>
+            <input v-model="form.title" maxlength="180" placeholder="添加标题（可选）" aria-label="帖子标题，可选" />
+            <div class="rf-markdown-mode" role="tablist" aria-label="正文模式">
+              <button type="button" role="tab" data-editor-mode="edit" :tabindex="editorMode === 'edit' ? 0 : -1" :aria-selected="editorMode === 'edit'" :class="{ active: editorMode === 'edit' }" @click="editorMode = 'edit'" @keydown="handleEditorTabKeydown"><AppIcon name="edit" size="15" />编辑</button>
+              <button type="button" role="tab" data-editor-mode="preview" :tabindex="editorMode === 'preview' ? 0 : -1" :aria-selected="editorMode === 'preview'" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'" @keydown="handleEditorTabKeydown"><AppIcon name="eye" size="15" />预览</button>
+            </div>
+            <textarea v-show="editorMode === 'edit'" v-model="form.content" rows="9" maxlength="50000" autofocus placeholder="分享你的想法" aria-label="帖子正文，支持 Markdown" />
+            <div v-show="editorMode === 'preview'" class="rf-markdown-preview">
+              <MarkdownContent v-if="form.content.trim()" :source="form.content" />
+              <span v-else>暂无内容</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div v-if="tags.length" class="rf-tag-list" aria-label="已添加标签">
-        <button v-for="(tag, index) in tags" :key="tag" type="button" :aria-label="`移除标签 ${tag}`" @click="removeTag(index)">#{{ tag }}<AppIcon name="close" size="13" /></button>
-      </div>
-      <div v-if="media.length" class="rf-selected-media">
-        <figure v-for="(item, index) in media" :key="item.url">
-          <video v-if="isVideo(item.file)" :src="item.url" controls playsinline preload="metadata" />
-          <img v-else :src="item.url" alt="待上传图片" />
-          <button type="button" aria-label="移除媒体" @click="removeMedia(index)"><AppIcon name="close" size="16" /></button>
-        </figure>
+        <div v-if="tags.length" class="rf-tag-list" aria-label="已添加标签">
+          <button v-for="(tag, index) in tags" :key="tag" type="button" :aria-label="`移除标签 ${tag}`" @click="removeTag(index)">#{{ tag }}<AppIcon name="close" size="13" /></button>
+        </div>
+        <div v-if="media.length" class="rf-selected-media">
+          <figure v-for="(item, index) in media" :key="item.url">
+            <video v-if="isVideo(item.file)" :src="item.url" controls playsinline preload="metadata" />
+            <img v-else :src="item.url" alt="待上传图片" />
+            <button type="button" aria-label="移除媒体" @click="removeMedia(index)"><AppIcon name="close" size="16" /></button>
+          </figure>
+        </div>
       </div>
 
       <footer class="rf-mobile-tools">
@@ -347,7 +349,7 @@ onBeforeUnmount(() => {
 .rf-markdown-mode { display: inline-grid; grid-template-columns: repeat(2, minmax(72px, 1fr)); gap: 2px; margin-bottom: 8px; padding: 3px; border: 1px solid var(--rf-line); border-radius: 7px; background: var(--rf-bg-subtle); }
 .rf-markdown-mode button { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border-radius: 5px; color: var(--rf-muted); background: transparent; font-size: 13px; font-weight: 650; }
 .rf-markdown-mode button.active { color: var(--rf-text); background: var(--rf-bg); box-shadow: 0 1px 3px color-mix(in srgb, var(--rf-text) 10%, transparent); }
-.rf-markdown-preview { min-height: 254px; padding: 12px; overflow: auto; border: 1px solid var(--rf-line); border-radius: 10px; color: var(--rf-text); background: var(--rf-bg-subtle); line-height: 1.65; }
+.rf-markdown-preview { width: 100%; min-width: 0; max-width: 100%; min-height: 254px; padding: 12px; overflow: auto; overflow-wrap: anywhere; border: 1px solid var(--rf-line); border-radius: 10px; color: var(--rf-text); background: var(--rf-bg-subtle); line-height: 1.65; }
 .rf-markdown-preview > span { color: var(--rf-muted); }
 .rf-desktop-markdown-input { position: relative; overflow: hidden; padding: 12px 12px 32px; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg-subtle); }
 .rf-desktop-markdown-input textarea { display: block; width: 100%; min-height: 220px; padding: 0; border: 0; outline: 0; color: var(--rf-text); background: transparent; font: inherit; line-height: 1.65; resize: vertical; }
@@ -404,21 +406,22 @@ onBeforeUnmount(() => {
 .rf-media-picker:hover { background: var(--rf-bg-hover); }
 .rf-media-picker.disabled { cursor: wait; opacity: .6; }
 .rf-media-picker input, .rf-mobile-tools input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
-.rf-mobile-composer { position: relative; display: flex; min-height: calc(100dvh - var(--rf-mobile-bottom-nav)); flex-direction: column; background: var(--rf-bg); }
-.rf-mobile-composer > header { position: sticky; top: 0; z-index: 5; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 92%, transparent); backdrop-filter: blur(12px); }
+.rf-mobile-composer { position: relative; display: grid; width: 100%; min-width: 0; height: calc(100dvh - var(--rf-mobile-bottom-nav)); max-height: calc(100dvh - var(--rf-mobile-bottom-nav)); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; background: var(--rf-bg); }
+.rf-mobile-composer > header { position: relative; z-index: 5; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 92%, transparent); backdrop-filter: blur(12px); }
 .rf-mobile-composer > header strong { justify-self: center; font-size: 17px; }
+.rf-mobile-composer-scroll { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .rf-mobile-publish { min-width: 66px; min-height: 36px; padding: 0 14px; border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-size: 13px; font-weight: 700; }
 .rf-mobile-publish:disabled { cursor: not-allowed; opacity: .45; }
 .rf-mobile-board { display: grid; min-height: 48px; grid-template-columns: 20px minmax(0, 1fr) 16px; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--rf-line); color: var(--primary); }
 .rf-mobile-board select { width: 100%; height: 46px; border: 0; outline: 0; color: var(--rf-text); background: transparent; font-size: 15px; font-weight: 650; appearance: none; }
-.rf-mobile-editor { display: grid; flex: 1; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 10px; padding: 14px; }
+.rf-mobile-editor { display: grid; width: 100%; min-width: 0; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 10px; padding: 14px; }
 .rf-mobile-editor > div { min-width: 0; }
 .rf-mobile-editor input { width: 100%; height: 40px; padding: 0; border: 0; border-bottom: 1px solid var(--rf-line); outline: 0; color: var(--rf-text); background: transparent; font-size: 17px; font-weight: 650; }
 .rf-mobile-editor .rf-markdown-mode { margin: 8px 0 0; }
 .rf-mobile-editor textarea { display: block; width: 100%; min-height: 210px; padding: 12px 0; border: 0; outline: 0; color: var(--rf-text); background: transparent; font-size: 18px; line-height: 1.55; resize: none; }
 .rf-mobile-editor .rf-markdown-preview { min-height: 210px; padding: 12px 0; border: 0; background: transparent; font-size: 17px; }
-.rf-mobile-composer > .rf-tag-list, .rf-mobile-composer > .rf-selected-media { margin: 0; padding: 0 14px 10px 64px; }
-.rf-mobile-tools { position: sticky; bottom: var(--rf-mobile-bottom-nav); z-index: 4; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 12px; border-top: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 94%, transparent); backdrop-filter: blur(12px); }
+.rf-mobile-composer-scroll > .rf-tag-list, .rf-mobile-composer-scroll > .rf-selected-media { margin: 0; padding: 0 14px 10px 64px; }
+.rf-mobile-tools { position: relative; z-index: 4; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 12px calc(5px + env(safe-area-inset-bottom)); border-top: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 94%, transparent); backdrop-filter: blur(12px); }
 .rf-mobile-tools > label:first-child { display: inline-grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: var(--primary); cursor: pointer; }
 .rf-mobile-tools > label:first-child:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
 .rf-mobile-tag-input { display: grid; min-width: 0; height: 40px; grid-template-columns: 20px minmax(0, 1fr) 30px; align-items: center; gap: 5px; padding: 0 8px; border-radius: var(--rf-pill); color: var(--rf-muted); background: var(--rf-bg-subtle); }
@@ -427,6 +430,6 @@ onBeforeUnmount(() => {
 .rf-mobile-tools > span { min-width: 30px; color: var(--rf-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
 @media (max-width: 380px) {
   .rf-mobile-editor { padding-inline: 10px; }
-  .rf-mobile-composer > .rf-tag-list, .rf-mobile-composer > .rf-selected-media { padding-left: 60px; padding-right: 10px; }
+  .rf-mobile-composer-scroll > .rf-tag-list, .rf-mobile-composer-scroll > .rf-selected-media { padding-left: 60px; padding-right: 10px; }
 }
 </style>

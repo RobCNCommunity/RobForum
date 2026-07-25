@@ -208,7 +208,7 @@ onMounted(load)
           <img v-if="profile.user.cover_url" :src="profile.user.cover_url" alt="" />
         </div>
         <div class="rf-x-profile-action-row">
-          <UserAvatar class="rf-x-profile-avatar" :src="profile.user.avatar_url" :name="profile.user.display_name" :size="104" />
+          <UserAvatar class="rf-x-profile-avatar" :src="profile.user.avatar_url" :name="profile.user.display_name" :size="104" :frame="profile.user.avatar_frame" />
           <div class="rf-x-profile-actions">
             <RouterLink v-if="isMe" to="/settings/profile" class="rf-x-outline-button">编辑个人资料</RouterLink>
             <template v-else>
@@ -264,7 +264,7 @@ onMounted(load)
           <template v-if="profileTab === 'posts'">
             <div v-if="profile.posts.length" class="rf-x-timeline">
               <RouterLink v-for="post in profile.posts" :key="post.id" :to="`/posts/${post.id}`" class="rf-x-post-row">
-                <UserAvatar :src="profile.user.avatar_url" :name="profile.user.display_name" :size="42" />
+                <UserAvatar :src="profile.user.avatar_url" :name="profile.user.display_name" :size="42" :frame="profile.user.avatar_frame" />
                 <div class="rf-x-post-body">
                   <div class="rf-x-post-meta">
                     <strong>{{ profile.user.display_name }}</strong>
@@ -293,7 +293,7 @@ onMounted(load)
           <template v-else>
             <div v-if="profile.resources.length" class="rf-x-resource-list">
               <article v-for="item in profile.resources" :key="item.id" class="rf-x-resource-row">
-                <UserAvatar :src="profile.user.avatar_url" :name="profile.user.display_name" :size="42" />
+                <UserAvatar :src="profile.user.avatar_url" :name="profile.user.display_name" :size="42" :frame="profile.user.avatar_frame" />
                 <div>
                   <header>
                     <span><strong>{{ profile.user.display_name }}</strong><VerifiedBadge :verified="profile.user.blue_verified" :label="profile.user.verification_label" /><MembershipBadge :active="profile.user.member_active" :tier-id="profile.user.membership_tier_id" /><small>{{ profileHandle }}</small></span>

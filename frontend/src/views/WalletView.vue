@@ -39,7 +39,7 @@ const money = (cents: number) => `¥${yuan(cents)}`
 const percent = (bps: number) => `${(Number(bps || 0) / 100).toFixed(2).replace(/\.00$/, '')}%`
 
 function entryLabel(value: string) {
-  return ({ wallet_top_up: '钱包充值', redeem_code: '兑换码到账', resource_purchase: '资源购买', resource_sale: '资源销售', payout: '创作者提现' } as Record<string, string>)[value] || value
+  return ({ wallet_top_up: '钱包充值', redeem_code: '兑换码到账', resource_purchase: '资源购买', resource_sale: '资源销售', avatar_frame_purchase: '头像框购买', payout: '创作者提现' } as Record<string, string>)[value] || value
 }
 
 function topUpStatus(value: string) {

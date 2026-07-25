@@ -450,7 +450,7 @@ onBeforeUnmount(() => {
         <article class="rf-x-status-post">
           <header class="rf-x-status-author">
             <RouterLink :to="`/users/${post.author_id}`" :aria-label="`查看 ${post.author_name} 的个人主页`">
-              <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="48" />
+              <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="48" :frame="post.author_avatar_frame" />
             </RouterLink>
             <RouterLink :to="`/users/${post.author_id}`" class="rf-x-status-author-copy">
               <span><strong>{{ post.author_name }}</strong><VerifiedBadge :verified="post.author_verified" :label="post.author_verification_label" /><MembershipBadge :active="post.author_member" :tier-id="post.author_membership_tier_id" /></span>
@@ -538,7 +538,7 @@ onBeforeUnmount(() => {
     <ContentReportDialog :open="reportOpen" :target-label="reportTarget?.label || ''" :submitting="reporting" @close="reportTarget = null" @submit="submitReport" />
     <PostImageViewer v-if="post" v-model:open="viewerOpen" :media="viewerMedia" :start-index="viewerIndex">
       <header class="rf-viewer-author">
-        <RouterLink :to="`/users/${post.author_id}`" @click="closeImageViewer"><UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" /></RouterLink>
+        <RouterLink :to="`/users/${post.author_id}`" @click="closeImageViewer"><UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" :frame="post.author_avatar_frame" /></RouterLink>
         <div>
           <RouterLink :to="`/users/${post.author_id}`" @click="closeImageViewer">
             <strong>{{ post.author_name }}</strong>

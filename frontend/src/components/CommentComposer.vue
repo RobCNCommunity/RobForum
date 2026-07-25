@@ -64,7 +64,7 @@ defineExpose({ focus })
 
 <template>
   <form class="rf-comment-composer" :class="{ compact }" @submit.prevent="emit('submit')">
-    <UserAvatar :src="auth.user?.avatar_url" :name="auth.user?.display_name" :size="compact ? 34 : 42" />
+    <UserAvatar :src="auth.user?.avatar_url" :name="auth.user?.display_name" :size="compact ? 34 : 42" :frame="auth.user?.avatar_frame" />
     <div>
       <div v-if="replyingTo" class="rf-comment-replying">
         <span>回复 <strong>@{{ replyingTo.author_name }}</strong></span>

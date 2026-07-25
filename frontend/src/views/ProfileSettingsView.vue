@@ -139,7 +139,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <button type="button" class="rf-x-edit-avatar" aria-label="选择头像图片" @click="avatarInput?.click()">
-          <UserAvatar :src="currentAvatar" :name="form.display_name" :size="112" />
+          <UserAvatar :src="currentAvatar" :name="form.display_name" :size="112" :frame="auth.user?.avatar_frame" />
           <span><AppIcon name="image" size="20" /></span>
         </button>
         <input ref="avatarInput" class="rf-visually-hidden" type="file" :accept="acceptedImageTypes" @change="chooseImage($event, 'avatar')" />

@@ -39,7 +39,7 @@ function formatDate(value: string) {
 <template>
   <article class="rf-feed-post">
     <RouterLink :to="`/users/${post.author_id}`" :aria-label="`查看 ${post.author_name} 的个人主页`" class="rf-feed-post-avatar">
-      <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" />
+      <UserAvatar :src="post.author_avatar" :name="post.author_name" :size="42" :frame="post.author_avatar_frame" />
     </RouterLink>
     <div class="rf-feed-post-body">
       <div class="rf-feed-post-meta">

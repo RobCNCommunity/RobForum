@@ -47,7 +47,7 @@ onBeforeUnmount(() => { enhancementVersion += 1 })
 </template>
 
 <style scoped>
-.rf-markdown { min-width: 0; color: inherit; font: inherit; line-break: strict; overflow-wrap: break-word; word-break: auto-phrase; }
+.rf-markdown { width: 100%; min-width: 0; max-width: 100%; color: inherit; font: inherit; line-break: strict; overflow-wrap: anywhere; word-break: break-word; }
 .rf-markdown :deep(> :first-child) { margin-top: 0; }
 .rf-markdown :deep(> :last-child) { margin-bottom: 0; }
 .rf-markdown :deep(p) { margin: 0 0 0.8em; white-space: normal; }

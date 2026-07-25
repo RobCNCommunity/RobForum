@@ -12,7 +12,7 @@ const emit = defineEmits<{ logout: [] }>()
 <template>
   <div class="rf-sidebar-account">
     <RouterLink :to="`/users/${props.user.id}`" class="rf-sidebar-account-profile" :aria-label="`查看 ${props.user.display_name} 的个人主页`">
-      <UserAvatar :src="props.user.avatar_url" :name="props.user.display_name" :size="38" />
+      <UserAvatar :src="props.user.avatar_url" :name="props.user.display_name" :size="38" :frame="props.user.avatar_frame" />
       <span class="rf-sidebar-account-name">
         <strong>{{ props.user.display_name }}</strong>
         <VerifiedBadge :verified="props.user.blue_verified" :label="props.user.verification_label" /><MembershipBadge :active="props.user.member_active" :tier-id="props.user.membership_tier_id" />
