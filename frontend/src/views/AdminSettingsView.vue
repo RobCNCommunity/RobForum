@@ -27,6 +27,7 @@ import { useSiteStore } from '@/stores/site'
 const siteStore = useSiteStore()
 const site = reactive<SiteSettings>({
   site_name: '', site_description: '', logo_url: '', avatar_url: '', verification_badge_url: '', primary_color: '#1d9bf0', public_url: '',
+  user_agreement_url: '', cookies_policy_url: '',
   allow_register: true, require_email_verification: false, post_review_required: true, allowed_email_domains: [],
   banner_enabled: false, banner_text: '', banner_link: '', updated_at: '',
 })
@@ -204,6 +205,8 @@ function adapterLabel(value: string) {
           <label class="rf-field-label"><span>站点简介</span><input v-model="site.site_description" class="rf-control" maxlength="240" /></label>
           <div class="rf-form-grid rf-form-grid--two"><label class="rf-field-label"><span>Logo URL</span><input v-model="site.logo_url" class="rf-control" type="url" placeholder="https://.../logo.png" /></label><label class="rf-field-label"><span>社区头像 URL</span><input v-model="site.avatar_url" class="rf-control" type="url" placeholder="https://.../avatar.png" /></label></div>
           <label class="rf-field-label"><span>公网地址</span><input v-model="site.public_url" class="rf-control" type="url" placeholder="https://community.example.com" /></label>
+
+          <div class="rf-form-grid rf-form-grid--two"><label class="rf-field-label"><span>用户协议链接</span><input v-model="site.user_agreement_url" class="rf-control" maxlength="500" placeholder="/user-agreement 或 https://..." /><small>显示在登录弹窗底部，支持站内相对路径或完整网址。</small></label><label class="rf-field-label"><span>Cookies 政策链接</span><input v-model="site.cookies_policy_url" class="rf-control" maxlength="500" placeholder="/cookies 或 https://..." /><small>留空时保留提示文字，但不生成可点击链接。</small></label></div>
 
           <div class="rf-form-section"><div><strong>全站横幅</strong><p>用于展示一条短公告，可链接到活动或规则页面。</p></div><label class="rf-switch-row"><input v-model="site.banner_enabled" type="checkbox" /><span class="rf-toggle" aria-hidden="true" /><span>{{ site.banner_enabled ? '已开启' : '已关闭' }}</span></label></div>
           <label class="rf-field-label"><span>横幅文字</span><input v-model="site.banner_text" class="rf-control" maxlength="240" placeholder="例如：社区活动正在进行中" /></label>

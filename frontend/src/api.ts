@@ -51,6 +51,8 @@ export interface SiteSettings {
   verification_badge_url: string
   primary_color: string
   public_url: string
+  user_agreement_url: string
+  cookies_policy_url: string
   allow_register: boolean
   require_email_verification: boolean
   post_review_required: boolean

@@ -167,6 +167,8 @@ func (s *Store) migrate() error {
 		{table: "site_settings", name: "banner_link", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "site_settings", name: "verification_badge_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "site_settings", name: "post_review_required", def: "TINYINT(1) NOT NULL DEFAULT 1"},
+		{table: "site_settings", name: "user_agreement_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
+		{table: "site_settings", name: "cookies_policy_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "conversation_members", name: "membership_status", def: "VARCHAR(16) NOT NULL DEFAULT 'accepted'"},
 		{table: "conversation_members", name: "invited_by", def: "BIGINT NULL"},
 		{table: "conversation_members", name: "responded_at", def: "DATETIME(6) NULL"},
@@ -432,7 +434,7 @@ func getSiteSettings(queryer rowQueryer) (domain.SiteSettings, error) {
 	var result domain.SiteSettings
 	var allow, verify, postReviewRequired, bannerEnabled int
 	var domainsJSON string
-	err := queryer.QueryRow(`SELECT site_name, site_description, logo_url, avatar_url, verification_badge_url, primary_color, public_url, allow_register, require_email_verification, post_review_required, allowed_email_domains, banner_enabled, banner_text, banner_link, updated_at FROM site_settings WHERE id = 1`).Scan(&result.SiteName, &result.SiteDescription, &result.LogoURL, &result.AvatarURL, &result.VerificationBadgeURL, &result.PrimaryColor, &result.PublicURL, &allow, &verify, &postReviewRequired, &domainsJSON, &bannerEnabled, &result.BannerText, &result.BannerLink, &result.UpdatedAt)
+	err := queryer.QueryRow(`SELECT site_name, site_description, logo_url, avatar_url, verification_badge_url, primary_color, public_url, user_agreement_url, cookies_policy_url, allow_register, require_email_verification, post_review_required, allowed_email_domains, banner_enabled, banner_text, banner_link, updated_at FROM site_settings WHERE id = 1`).Scan(&result.SiteName, &result.SiteDescription, &result.LogoURL, &result.AvatarURL, &result.VerificationBadgeURL, &result.PrimaryColor, &result.PublicURL, &result.UserAgreementURL, &result.CookiesPolicyURL, &allow, &verify, &postReviewRequired, &domainsJSON, &bannerEnabled, &result.BannerText, &result.BannerLink, &result.UpdatedAt)
 	if err != nil {
 		return result, err
 	}
@@ -458,6 +460,12 @@ func getSiteSettings(queryer rowQueryer) (domain.SiteSettings, error) {
 	if validateWebURL(result.PublicURL, false) != nil {
 		result.PublicURL = ""
 	}
+	if validateWebURL(result.UserAgreementURL, true) != nil {
+		result.UserAgreementURL = ""
+	}
+	if validateWebURL(result.CookiesPolicyURL, true) != nil {
+		result.CookiesPolicyURL = ""
+	}
 	if validateWebURL(result.BannerLink, true) != nil {
 		result.BannerLink = ""
 	}
@@ -476,6 +484,8 @@ func (s *Store) UpdateSiteSettings(actorID int64, input domain.SiteSettings) (do
 	input.VerificationBadgeURL = strings.TrimSpace(input.VerificationBadgeURL)
 	input.PrimaryColor = strings.TrimSpace(input.PrimaryColor)
 	input.PublicURL = strings.TrimRight(strings.TrimSpace(input.PublicURL), "/")
+	input.UserAgreementURL = strings.TrimSpace(input.UserAgreementURL)
+	input.CookiesPolicyURL = strings.TrimSpace(input.CookiesPolicyURL)
 	input.BannerText = strings.TrimSpace(input.BannerText)
 	input.BannerLink = strings.TrimSpace(input.BannerLink)
 	if input.SiteName == "" || len([]rune(input.SiteName)) > 120 {
@@ -493,7 +503,7 @@ func (s *Store) UpdateSiteSettings(actorID int64, input domain.SiteSettings) (do
 	for _, candidate := range []struct {
 		value         string
 		allowRelative bool
-	}{{input.LogoURL, true}, {input.AvatarURL, true}, {input.VerificationBadgeURL, true}, {input.PublicURL, false}, {input.BannerLink, true}} {
+	}{{input.LogoURL, true}, {input.AvatarURL, true}, {input.VerificationBadgeURL, true}, {input.PublicURL, false}, {input.UserAgreementURL, true}, {input.CookiesPolicyURL, true}, {input.BannerLink, true}} {
 		if err := validateWebURL(candidate.value, candidate.allowRelative); err != nil {
 			return domain.SiteSettings{}, err
 		}
@@ -518,7 +528,7 @@ func (s *Store) UpdateSiteSettings(actorID int64, input domain.SiteSettings) (do
 		return domain.SiteSettings{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE site_settings SET site_name = ?, site_description = ?, logo_url = ?, avatar_url = ?, verification_badge_url = ?, primary_color = ?, public_url = ?, allow_register = ?, require_email_verification = ?, post_review_required = ?, allowed_email_domains = ?, banner_enabled = ?, banner_text = ?, banner_link = ?, updated_at = ? WHERE id = 1`, input.SiteName, input.SiteDescription, input.LogoURL, input.AvatarURL, input.VerificationBadgeURL, input.PrimaryColor, input.PublicURL, boolInt(input.AllowRegister), boolInt(input.RequireEmailVerification), boolInt(input.PostReviewRequired), string(domains), boolInt(input.BannerEnabled), input.BannerText, input.BannerLink, now)
+	result, err := tx.Exec(`UPDATE site_settings SET site_name = ?, site_description = ?, logo_url = ?, avatar_url = ?, verification_badge_url = ?, primary_color = ?, public_url = ?, user_agreement_url = ?, cookies_policy_url = ?, allow_register = ?, require_email_verification = ?, post_review_required = ?, allowed_email_domains = ?, banner_enabled = ?, banner_text = ?, banner_link = ?, updated_at = ? WHERE id = 1`, input.SiteName, input.SiteDescription, input.LogoURL, input.AvatarURL, input.VerificationBadgeURL, input.PrimaryColor, input.PublicURL, input.UserAgreementURL, input.CookiesPolicyURL, boolInt(input.AllowRegister), boolInt(input.RequireEmailVerification), boolInt(input.PostReviewRequired), string(domains), boolInt(input.BannerEnabled), input.BannerText, input.BannerLink, now)
 	if err != nil {
 		return domain.SiteSettings{}, err
 	}

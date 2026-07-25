@@ -55,6 +55,8 @@ type SiteSettings struct {
 	VerificationBadgeURL     string    `json:"verification_badge_url"`
 	PrimaryColor             string    `json:"primary_color"`
 	PublicURL                string    `json:"public_url"`
+	UserAgreementURL         string    `json:"user_agreement_url"`
+	CookiesPolicyURL         string    `json:"cookies_policy_url"`
 	AllowRegister            bool      `json:"allow_register"`
 	RequireEmailVerification bool      `json:"require_email_verification"`
 	PostReviewRequired       bool      `json:"post_review_required"`

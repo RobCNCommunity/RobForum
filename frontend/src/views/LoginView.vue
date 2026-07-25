@@ -241,6 +241,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewport))
           <span>还没有账号？</span>
           <button type="button" @click="openRegister">创建账号</button>
         </footer>
+        <p class="rf-login-consent">登录即代表您同意我们的<a v-if="site.settings?.user_agreement_url" :href="site.settings.user_agreement_url" target="_blank" rel="noopener noreferrer">用户协议</a><span v-else>用户协议</span>和<a v-if="site.settings?.cookies_policy_url" :href="site.settings.cookies_policy_url" target="_blank" rel="noopener noreferrer">cookies政策</a><span v-else>cookies政策</span></p>
       </section>
     </nut-popup>
   </div>

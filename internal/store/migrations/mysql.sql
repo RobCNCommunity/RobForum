@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS site_settings (
   verification_badge_url VARCHAR(500) NOT NULL DEFAULT '',
   primary_color VARCHAR(32) NOT NULL,
   public_url VARCHAR(255) NOT NULL,
+  user_agreement_url VARCHAR(500) NOT NULL DEFAULT '',
+  cookies_policy_url VARCHAR(500) NOT NULL DEFAULT '',
   allow_register TINYINT(1) NOT NULL DEFAULT 1,
   require_email_verification TINYINT(1) NOT NULL DEFAULT 0,
   post_review_required TINYINT(1) NOT NULL DEFAULT 1,
