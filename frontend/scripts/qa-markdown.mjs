@@ -16,6 +16,43 @@ const markdown = `## Markdown 标题
 
 [安全链接](https://example.com)
 
+行内公式：$E = mc^2$。
+
+$$
+\\int_0^1 x^2 \\, dx = \\frac{1}{3}
+$$
+
+\`\`\`mermaid
+flowchart LR
+  markdown[Markdown] --> render[安全渲染]
+\`\`\`
+
+\`\`\`javascript
+const greeting = "hello"
+console.log(greeting)
+\`\`\`
+
+\`\`\`python
+def greet(name: str) -> str:
+    return f"Hello, {name}"
+\`\`\`
+
+\`\`\`go
+func main() {
+    fmt.Println("hello")
+}
+\`\`\`
+
+\`\`\`rust
+fn main() {
+    println!("hello");
+}
+\`\`\`
+
+\`\`\`made-up-language
+plain fallback <stays safe>
+\`\`\`
+
 <script>window.__markdownXss = true</script>
 <p onmouseover="window.__markdownXss = true">安全清理段落</p>`
 
@@ -70,6 +107,23 @@ async function assertRendered(page, scope) {
   if (await root.locator('script').count()) throw new Error(`${scope}: script was not sanitized`)
   if (await root.locator('[onmouseover]').count()) throw new Error(`${scope}: event attribute was not sanitized`)
   if (await page.evaluate(() => window.__markdownXss === true)) throw new Error(`${scope}: unsafe HTML executed`)
+  await root.locator('p .katex').waitFor({ timeout: 10_000 })
+  if (await root.locator('p .katex').count() !== 1) throw new Error(`${scope}: inline LaTeX was not rendered`)
+  if (await root.locator('.katex-display > .katex').count() !== 1) throw new Error(`${scope}: block LaTeX was not rendered`)
+  if (await root.locator('.katex-mathml math').count() !== 2) throw new Error(`${scope}: accessible LaTeX MathML missing`)
+  const diagram = root.locator('.rf-mermaid[role="img"]')
+  await diagram.locator('svg').waitFor({ timeout: 10_000 })
+  if (await diagram.getAttribute('aria-label') !== 'Mermaid 图表') throw new Error(`${scope}: Mermaid accessible label missing`)
+  if (await root.locator('pre[data-language="mermaid"]').count()) throw new Error(`${scope}: Mermaid source block was not replaced`)
+  if (await diagram.locator('script, foreignObject, [onload], a[href^="javascript:"]').count()) throw new Error(`${scope}: Mermaid output was not sanitized`)
+  for (const language of ['javascript', 'python', 'go', 'rust']) {
+    const code = root.locator(`pre[data-language="${language}"] > code.hljs.language-${language}`)
+    if (await code.count() !== 1) throw new Error(`${scope}: ${language} code block was not highlighted`)
+    if (await code.locator('span').count() === 0) throw new Error(`${scope}: ${language} highlighting emitted no syntax tokens`)
+  }
+  const fallback = root.locator('pre[data-language="made-up-language"] > code')
+  if (await fallback.count() !== 1) throw new Error(`${scope}: unknown language fallback missing`)
+  if ((await fallback.textContent())?.trim() !== 'plain fallback <stays safe>') throw new Error(`${scope}: unknown language fallback changed source text`)
 }
 
 async function verifyComposer(browser, name, viewport) {
@@ -89,25 +143,28 @@ async function verifyComposer(browser, name, viewport) {
   if (await previewTab.getAttribute('aria-selected') !== 'true') throw new Error(`${name}: preview tab did not activate from keyboard`)
   if (!await previewTab.evaluate((element) => element === document.activeElement)) throw new Error(`${name}: preview tab did not receive keyboard focus`)
   await assertRendered(page, '.rf-markdown-preview')
-  await page.screenshot({ path: `${evidenceDir}/${name}-composer-preview.png` })
+  await page.screenshot({ path: `${evidenceDir}/${name}-composer-preview.png`, fullPage: true })
   await previewTab.press('ArrowLeft')
   if (await editTab.getAttribute('aria-selected') !== 'true') throw new Error(`${name}: edit tab did not reactivate from keyboard`)
   if (await editor.inputValue() !== markdown) throw new Error(`${name}: editor lost Markdown source`)
   await context.close()
 }
 
-async function verifyPublished(browser, name, viewport) {
-  const context = await browser.newContext({ viewport })
+async function verifyPublished(browser, name, viewport, colorScheme = 'light') {
+  const context = await browser.newContext({ viewport, colorScheme })
   const page = await context.newPage()
   await mockAPI(page)
   await page.goto(`${baseURL}/posts/1`, { waitUntil: 'networkidle' })
   await assertRendered(page, '.rf-x-status-content')
-  await page.screenshot({ path: `${evidenceDir}/${name}-post.png` })
+  await page.screenshot({ path: `${evidenceDir}/${name}-post.png`, fullPage: true })
   await page.goto(baseURL, { waitUntil: 'networkidle' })
   const feed = page.locator('.rf-feed-post-copy .rf-markdown')
   await feed.waitFor()
-  if ((await feed.textContent())?.includes('**')) throw new Error(`${name}: feed exposed raw Markdown syntax`)
-  await page.screenshot({ path: `${evidenceDir}/${name}-feed.png` })
+  const feedText = await feed.textContent() || ''
+  if (feedText.includes('**')) throw new Error(`${name}: feed exposed raw Markdown syntax`)
+  if (feedText.includes('flowchart')) throw new Error(`${name}: feed exposed raw Mermaid source`)
+  if ((feedText.match(/E = mc\^2/g) || []).length !== 1) throw new Error(`${name}: feed did not preserve one plain-text formula`)
+  await page.screenshot({ path: `${evidenceDir}/${name}-feed.png`, fullPage: true })
   await context.close()
 }
 
@@ -119,6 +176,8 @@ try {
   await verifyPublished(browser, 'tablet', { width: 768, height: 900 })
   await verifyComposer(browser, 'mobile', { width: 375, height: 812 })
   await verifyPublished(browser, 'mobile', { width: 375, height: 812 })
+  await verifyPublished(browser, 'desktop-dark', { width: 1280, height: 900 }, 'dark')
+  await verifyPublished(browser, 'mobile-dark', { width: 375, height: 812 }, 'dark')
   console.log('PASS Markdown composer, rendering, and sanitization on desktop/tablet/mobile')
 } finally {
   await browser.close()
