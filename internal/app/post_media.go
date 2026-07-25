@@ -29,7 +29,7 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 	title := r.FormValue("title")
 	content := r.FormValue("content")
 	tags := r.MultipartForm.Value["tags"]
-	machineApproved := s.postMachineApproved(r, moderationText("标题："+title, "正文："+content))
+	machineApproved := s.postMachineApproved(r, postModerationText(title, content, tags))
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
 		files = r.MultipartForm.File["file"]

@@ -616,7 +616,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	machineApproved := s.postMachineApproved(r, moderationText("标题："+input.Title, "正文："+input.Content))
+	machineApproved := s.postMachineApproved(r, postModerationText(input.Title, input.Content, input.Tags))
 	item, err := s.store.CreateMachineModeratedPostWithTagsAndMedia(currentUser(r).ID, input.BoardID, input.Title, input.Content, input.Tags, nil, machineApproved)
 	if err != nil {
 		writeError(w, 400, "post_failed", err.Error())

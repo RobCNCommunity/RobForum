@@ -24,6 +24,16 @@ func moderationText(parts ...string) string {
 	return strings.Join(values, "\n")
 }
 
+func postModerationText(title, content string, tags []string) string {
+	parts := []string{"标题：" + title, "正文：" + content}
+	for _, tag := range tags {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			parts = append(parts, "标签："+tag)
+		}
+	}
+	return moderationText(parts...)
+}
+
 // approveContent runs before any user content is committed. A provider error,
 // malformed response, or failed audit write is fail-closed.
 func (s *Server) approveContent(w http.ResponseWriter, r *http.Request, contentType, content string) bool {
