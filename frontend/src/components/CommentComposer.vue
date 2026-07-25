@@ -10,12 +10,16 @@ const props = withDefaults(defineProps<{
   files?: readonly File[]
   previewUrls?: readonly string[]
   sending?: boolean
+  preparingFiles?: boolean
+  preparationLabel?: string
   replyingTo?: Comment | null
   compact?: boolean
 }>(), {
   files: () => [],
   previewUrls: () => [],
   sending: false,
+  preparingFiles: false,
+  preparationLabel: '',
   replyingTo: null,
   compact: false,
 })
@@ -83,12 +87,12 @@ defineExpose({ focus })
         </figure>
       </div>
       <footer>
-        <label aria-label="添加图片或视频" title="添加图片或视频">
+        <label :class="{ disabled: preparingFiles }" :aria-disabled="preparingFiles" aria-label="添加图片或视频" title="添加图片或视频">
           <AppIcon name="photo" size="19" />
-          <input type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple @change="chooseFiles" />
+          <input type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple :disabled="preparingFiles" @change="chooseFiles" />
         </label>
-        <span>{{ modelValue.length }}/5000</span>
-        <button type="submit" :disabled="(!modelValue.trim() && !files.length) || sending">{{ sending ? '发布中' : '回复' }}</button>
+        <span aria-live="polite">{{ preparingFiles ? preparationLabel : `${modelValue.length}/5000` }}</span>
+        <button type="submit" :disabled="(!modelValue.trim() && !files.length) || sending || preparingFiles">{{ sending ? '发布中' : '回复' }}</button>
       </footer>
     </div>
   </form>
@@ -109,6 +113,7 @@ defineExpose({ focus })
 .rf-comment-composer footer { display: flex; min-height: 38px; align-items: center; justify-content: flex-end; gap: 12px; border-top: 1px solid var(--rf-line); }
 .rf-comment-composer footer label { display: inline-grid; width: 34px; height: 34px; margin-right: auto; place-items: center; border-radius: 50%; color: var(--primary); cursor: pointer; }
 .rf-comment-composer footer label:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.rf-comment-composer footer label.disabled { cursor: wait; opacity: .5; }
 .rf-comment-composer footer input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .rf-comment-composer footer span { color: var(--rf-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .rf-comment-composer footer > button { min-width: 68px; min-height: 34px; padding: 0 16px; border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-weight: 700; }

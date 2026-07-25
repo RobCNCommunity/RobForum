@@ -9,6 +9,7 @@ import MarkdownContent from '@/components/MarkdownContent.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import QuotedPostContext from '@/components/QuotedPostContext.vue'
 import { useAuthStore } from '@/stores/auth'
+import { prepareCommunityMediaFile } from '@/lib/videoCompression'
 
 interface SelectedMedia {
   file: File
@@ -25,6 +26,8 @@ const tags = ref<string[]>([])
 const tagDraft = ref('')
 const isMobile = ref(false)
 const loading = ref(false)
+const preparingMedia = ref(false)
+const mediaPreparationLabel = ref('')
 const editorMode = ref<'edit' | 'preview'>('edit')
 const form = reactive({
   board_id: undefined as number | undefined,
@@ -32,6 +35,7 @@ const form = reactive({
   content: '',
 })
 let mobileQuery: MediaQueryList | undefined
+let mediaPreparationController: AbortController | undefined
 
 const selectedCount = computed(() => media.value.length)
 const rules = {
@@ -67,22 +71,45 @@ function handleEditorTabKeydown(event: KeyboardEvent) {
     ?.focus()
 }
 
-function chooseMedia(event: Event) {
+function formatUploadSize(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function chooseMedia(event: Event) {
   const input = event.target as HTMLInputElement
+  if (preparingMedia.value) {
+    input.value = ''
+    return
+  }
   const remaining = 4 - media.value.length
   const candidates = Array.from(input.files || []).slice(0, Math.max(0, remaining))
   if ((input.files?.length || 0) > remaining) Notify.warn('每篇帖子最多上传 4 个媒体文件')
-  for (const file of candidates) {
-    const image = ['image/png', 'image/jpeg'].includes(file.type) && /\.(png|jpe?g)$/i.test(file.name)
-    const video = ['video/mp4', 'video/webm'].includes(file.type) && /\.(mp4|webm)$/i.test(file.name)
-    const withinLimit = image ? file.size <= 5 * 1024 * 1024 : video && file.size <= 50 * 1024 * 1024
-    if (!withinLimit) {
-      Notify.warn('仅支持 PNG/JPG（5 MB 内）或 MP4/WebM（50 MB 内）')
-      continue
+  mediaPreparationController = new AbortController()
+  preparingMedia.value = true
+  try {
+    for (let index = 0; index < candidates.length; index += 1) {
+      const file = candidates[index]
+      if (!file) continue
+      mediaPreparationLabel.value = `处理文件 ${index + 1}/${candidates.length}`
+      try {
+        const prepared = await prepareCommunityMediaFile(file, (progress) => {
+          mediaPreparationLabel.value = `压缩视频 ${Math.round(progress * 100)}%`
+        }, mediaPreparationController.signal)
+        media.value.push({ file: prepared.file, url: URL.createObjectURL(prepared.file) })
+        if (prepared.compressed) {
+          Notify.success(`视频已压缩：${formatUploadSize(prepared.originalSize)} → ${formatUploadSize(prepared.file.size)}`)
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        Notify.warn(error instanceof Error ? error.message : '媒体文件处理失败')
+      }
     }
-    media.value.push({ file, url: URL.createObjectURL(file) })
+  } finally {
+    preparingMedia.value = false
+    mediaPreparationLabel.value = ''
+    mediaPreparationController = undefined
+    input.value = ''
   }
-  input.value = ''
 }
 
 function removeMedia(index: number) {
@@ -117,7 +144,7 @@ function handleTagKeydown(event: KeyboardEvent) {
 }
 
 async function submit() {
-  if (loading.value) return
+  if (loading.value || preparingMedia.value) return
   loading.value = true
   try {
     if (!form.board_id) {
@@ -172,6 +199,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  mediaPreparationController?.abort()
   mobileQuery?.removeEventListener('change', updateMobile)
   media.value.forEach((item) => URL.revokeObjectURL(item.url))
 })
@@ -181,9 +209,9 @@ onBeforeUnmount(() => {
   <PageContainer>
     <section v-if="isMobile" class="rf-mobile-composer">
       <header>
-        <button type="button" class="rf-icon-button" aria-label="取消发布" :disabled="loading" @click="router.back()"><AppIcon name="back" size="21" /></button>
+        <button type="button" class="rf-icon-button" aria-label="取消发布" :disabled="loading || preparingMedia" @click="router.back()"><AppIcon name="back" size="21" /></button>
         <strong>新帖子</strong>
-        <button type="button" class="rf-mobile-publish" :disabled="loading || !form.board_id || !form.content.trim()" @click="submit">{{ loading ? '发布中' : '发布' }}</button>
+        <button type="button" class="rf-mobile-publish" :disabled="loading || preparingMedia || !form.board_id || !form.content.trim()" @click="submit">{{ loading ? '发布中' : '发布' }}</button>
       </header>
 
       <label class="rf-mobile-board">
@@ -225,9 +253,9 @@ onBeforeUnmount(() => {
       </div>
 
       <footer class="rf-mobile-tools">
-        <label title="添加图片或视频" aria-label="添加图片或视频"><AppIcon name="photo" size="21" /><input ref="mediaInput" type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple @change="chooseMedia" /></label>
+        <label title="添加图片或视频" aria-label="添加图片或视频" :aria-disabled="preparingMedia"><AppIcon name="photo" size="21" /><input ref="mediaInput" type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple :disabled="preparingMedia" @change="chooseMedia" /></label>
         <label class="rf-mobile-tag-input"><AppIcon name="tag" size="19" /><input v-model="tagDraft" maxlength="25" placeholder="添加标签" @keydown="handleTagKeydown" /><button v-if="tagDraft" type="button" aria-label="确认添加标签" @click="addTag"><AppIcon name="add" size="17" /></button></label>
-        <span>{{ selectedCount }}/4</span>
+        <span aria-live="polite">{{ preparingMedia ? mediaPreparationLabel : `${selectedCount}/4` }}</span>
       </footer>
     </section>
 
@@ -275,10 +303,10 @@ onBeforeUnmount(() => {
               <button type="button" aria-label="移除媒体" @click="removeMedia(index)"><AppIcon name="close" size="16" /></button>
             </figure>
           </div>
-          <label class="rf-media-picker"><AppIcon name="upload" size="19" /><span>选择图片或视频</span><input ref="mediaInput" type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple @change="chooseMedia" /></label>
+          <label class="rf-media-picker" :class="{ disabled: preparingMedia }"><AppIcon name="upload" size="19" /><span aria-live="polite">{{ preparingMedia ? mediaPreparationLabel : '选择图片或视频' }}</span><input ref="mediaInput" type="file" accept="image/png,image/jpeg,video/mp4,video/webm" multiple :disabled="preparingMedia" @change="chooseMedia" /></label>
         </nut-form-item>
       </nut-form>
-      <footer class="rf-create-actions"><nut-button plain type="default" :disabled="loading" @click="router.back()">取消</nut-button><nut-button type="primary" :loading="loading" @click="submit">发布</nut-button></footer>
+      <footer class="rf-create-actions"><nut-button plain type="default" :disabled="loading || preparingMedia" @click="router.back()">取消</nut-button><nut-button type="primary" :loading="loading" :disabled="preparingMedia" @click="submit">发布</nut-button></footer>
     </section>
   </PageContainer>
 </template>
@@ -374,6 +402,7 @@ onBeforeUnmount(() => {
 .rf-selected-media figure > button { position: absolute; top: 6px; right: 6px; display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: #fff; background: rgba(15, 20, 25, .74); }
 .rf-media-picker { display: inline-flex; min-height: 42px; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--rf-line); border-radius: 8px; color: var(--primary); background: var(--rf-bg); cursor: pointer; font-weight: 650; }
 .rf-media-picker:hover { background: var(--rf-bg-hover); }
+.rf-media-picker.disabled { cursor: wait; opacity: .6; }
 .rf-media-picker input, .rf-mobile-tools input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .rf-mobile-composer { position: relative; display: flex; min-height: calc(100dvh - var(--rf-mobile-bottom-nav)); flex-direction: column; background: var(--rf-bg); }
 .rf-mobile-composer > header { position: sticky; top: 0; z-index: 5; display: grid; min-height: 54px; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--rf-line); background: color-mix(in srgb, var(--rf-bg) 92%, transparent); backdrop-filter: blur(12px); }

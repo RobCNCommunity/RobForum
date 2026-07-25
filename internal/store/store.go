@@ -1533,11 +1533,10 @@ func (s *Store) CreateCommentWithMediaAndParent(userID, postID int64, parentID *
 	notificationUserID := postAuthorID
 	if parentID != nil {
 		var parentPostID int64
-		var parentParentID sql.NullInt64
-		if err := tx.QueryRow(`SELECT post_id, author_id, parent_id FROM comments WHERE id = ? AND status = 'published' FOR UPDATE`, *parentID).Scan(&parentPostID, &notificationUserID, &parentParentID); err != nil {
+		if err := tx.QueryRow(`SELECT post_id, author_id FROM comments WHERE id = ? AND status = 'published' FOR UPDATE`, *parentID).Scan(&parentPostID, &notificationUserID); err != nil {
 			return domain.Comment{}, ErrParentCommentUnavailable
 		}
-		if err := validateCommentReplyTarget(parentPostID, postID, parentParentID); err != nil {
+		if err := validateCommentReplyTarget(parentPostID, postID); err != nil {
 			return domain.Comment{}, err
 		}
 	}

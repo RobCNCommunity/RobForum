@@ -36,6 +36,7 @@ import UserAvatar from '@/components/UserAvatar.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
 import { buildCommentTree } from '@/commentTree'
+import { prepareCommunityMediaFile } from '@/lib/videoCompression'
 
 interface CommentComposerHandle {
   focus: () => void
@@ -55,6 +56,8 @@ const replyingTo = ref<Comment | null>(null)
 const loading = ref(true)
 const pinning = ref(false)
 const sending = ref(false)
+const preparingCommentMedia = ref(false)
+const commentPreparationLabel = ref('')
 const likingPost = ref(false)
 const bookmarking = ref(false)
 const reposting = ref(false)
@@ -64,6 +67,7 @@ const reportTarget = ref<{ type: 'post' | 'comment'; id: number; label: string }
 const reporting = ref(false)
 const viewerOpen = ref(false)
 const viewerIndex = ref(0)
+let commentPreparationController: AbortController | undefined
 
 const canPin = computed(() => auth.isAdmin)
 const authorHandle = computed(() => post.value ? `@user_${post.value.author_id}` : '')
@@ -176,7 +180,7 @@ function cancelCommentReply() {
 
 async function submitComment() {
   const content = comment.value.trim()
-  if (!post.value || (!content && !commentFiles.value.length) || sending.value) return
+  if (!post.value || (!content && !commentFiles.value.length) || sending.value || preparingCommentMedia.value) return
   sending.value = true
   try {
     comments.value.push(await createComment(post.value.id, content, commentFiles.value, replyingTo.value?.id))
@@ -192,18 +196,41 @@ async function submitComment() {
   }
 }
 
-function chooseCommentFiles(files: File[]) {
+function formatUploadSize(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function chooseCommentFiles(files: File[]) {
+  if (preparingCommentMedia.value) return
   const remaining = 4 - commentFiles.value.length
   if (files.length > remaining) Notify.warn('每条回复最多上传 4 个媒体文件')
   const candidates = files.slice(0, Math.max(0, remaining))
-  const accepted = candidates.filter((file) => {
-    const image = ['image/png', 'image/jpeg'].includes(file.type) && file.size <= 5 * 1024 * 1024
-    const video = ['video/mp4', 'video/webm'].includes(file.type) && file.size <= 50 * 1024 * 1024
-    return image || video
-  })
-  if (accepted.length !== candidates.length) Notify.warn('仅支持 PNG/JPG（5 MB 内）或 MP4/WebM（50 MB 内）')
-  commentFiles.value.push(...accepted)
-  commentPreviewURLs.value.push(...accepted.map((file) => URL.createObjectURL(file)))
+  commentPreparationController = new AbortController()
+  preparingCommentMedia.value = true
+  try {
+    for (let index = 0; index < candidates.length; index += 1) {
+      const file = candidates[index]
+      if (!file) continue
+      commentPreparationLabel.value = `处理文件 ${index + 1}/${candidates.length}`
+      try {
+        const prepared = await prepareCommunityMediaFile(file, (progress) => {
+          commentPreparationLabel.value = `压缩视频 ${Math.round(progress * 100)}%`
+        }, commentPreparationController.signal)
+        commentFiles.value.push(prepared.file)
+        commentPreviewURLs.value.push(URL.createObjectURL(prepared.file))
+        if (prepared.compressed) {
+          Notify.success(`视频已压缩：${formatUploadSize(prepared.originalSize)} → ${formatUploadSize(prepared.file.size)}`)
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        Notify.warn(error instanceof Error ? error.message : '媒体文件处理失败')
+      }
+    }
+  } finally {
+    preparingCommentMedia.value = false
+    commentPreparationLabel.value = ''
+    commentPreparationController = undefined
+  }
 }
 
 function removeCommentFile(index: number) {
@@ -399,6 +426,7 @@ watch(() => route.params.id, () => {
 })
 onMounted(load)
 onBeforeUnmount(() => {
+  commentPreparationController?.abort()
   clearCommentFiles()
 })
 </script>
@@ -478,6 +506,8 @@ onBeforeUnmount(() => {
           :files="commentFiles"
           :preview-urls="commentPreviewURLs"
           :sending="sending"
+          :preparing-files="preparingCommentMedia"
+          :preparation-label="commentPreparationLabel"
           :replying-to="replyingTo"
           @submit="submitComment"
           @select-files="chooseCommentFiles"
@@ -547,6 +577,8 @@ onBeforeUnmount(() => {
         :files="commentFiles"
         :preview-urls="commentPreviewURLs"
         :sending="sending"
+        :preparing-files="preparingCommentMedia"
+        :preparation-label="commentPreparationLabel"
         :replying-to="replyingTo"
         @submit="submitComment"
         @select-files="chooseCommentFiles"

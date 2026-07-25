@@ -2,7 +2,11 @@
 import AppIcon from './AppIcon.vue'
 import { useTheme } from '@/theme'
 
-const { isDark, toggleTheme } = useTheme()
+const { isDark, transitioning, toggleTheme } = useTheme()
+
+function handleToggle(event: MouseEvent) {
+  toggleTheme({ x: event.clientX, y: event.clientY })
+}
 </script>
 
 <template>
@@ -12,7 +16,8 @@ const { isDark, toggleTheme } = useTheme()
     :aria-label="isDark ? '切换到亮色模式' : '切换到深色模式'"
     :aria-pressed="isDark"
     :title="isDark ? '切换到亮色模式' : '切换到深色模式'"
-    @click="toggleTheme"
+    :disabled="transitioning"
+    @click="handleToggle"
   >
     <AppIcon :name="isDark ? 'sun' : 'moon'" size="20" />
   </button>

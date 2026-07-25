@@ -83,7 +83,7 @@ function runMenuAction(action: 'delete' | 'report') {
         <p v-if="item.content">{{ item.content }}</p>
         <PostMediaGrid v-if="item.media?.length" :media="item.media" compact />
         <footer>
-          <button v-if="item.parent_id == null" type="button" aria-label="回复这条评论" :class="{ active: replyingToId === item.id }" @click="emit('reply', item)"><AppIcon name="message" size="16" /><span>回复</span></button>
+          <button type="button" aria-label="回复这条评论" :class="{ active: replyingToId === item.id }" @click="emit('reply', item)"><AppIcon name="message" size="16" /><span>回复</span></button>
           <button type="button" aria-label="点赞回复" :class="{ liked: item.liked }" :disabled="busyId === item.id" @click="emit('like', item)"><AppIcon name="heart" size="16" /><span>{{ formatCount(item.like_count) }}</span></button>
           <button type="button" aria-label="复制回复链接" @click="emit('share', item)"><AppIcon name="share" size="16" /></button>
         </footer>

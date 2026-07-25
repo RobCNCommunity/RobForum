@@ -20,6 +20,7 @@
     "highlight.js": "^11.11.1",
     "katex": "0.17.0",
     "marked": "^18.0.7",
+    "mediabunny": "1.51.0",
     "mermaid": "11.16.0",
     "pinia": "^3.0.3",
     "vue": "^3.5.18",
