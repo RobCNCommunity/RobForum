@@ -503,8 +503,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .rf-inline-note { margin-inline: 12px; }
   .rf-form-actions { width: 100%; align-items: stretch; }
   .rf-form-actions > *, .rf-form-actions .nut-button, .rf-form-actions .rf-primary-button { width: 100%; min-height: 44px; }
-  .rf-row-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .rf-row-actions > * { width: 100%; min-width: 0; min-height: 44px; }
+  .rf-row-actions, .rf-data-row > div.rf-row-actions { display: flex; width: 100%; flex-wrap: wrap; }
+  .rf-row-actions > * { min-width: 0; max-width: 100%; }
+  .rf-row-actions > :is(button, a, .nut-button) { width: auto; min-width: 44px; min-height: 44px; }
   .rf-button-small { min-height: 44px; padding-inline: 14px; }
   .rf-icon-button { width: 44px; height: 44px; }
   .rf-test-row { grid-template-columns: 1fr; }
