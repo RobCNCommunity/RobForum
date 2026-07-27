@@ -38,7 +38,7 @@ function excerpt(value: string, max = 140) {
 }
 
 function handle(user: UserSearchResult) {
-  const name = user.roblox_name?.trim().replace(/\s+/g, '_')
+  const name = (user.custom_uid || user.roblox_name)?.trim().replace(/\s+/g, '_')
   return `@${name || `user_${user.id}`}`
 }
 

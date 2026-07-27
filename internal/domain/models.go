@@ -4,6 +4,7 @@ import "time"
 
 type User struct {
 	ID                  int64        `json:"id"`
+	CustomUID           string       `json:"custom_uid,omitempty"`
 	Email               string       `json:"email"`
 	DisplayName         string       `json:"display_name"`
 	AvatarURL           string       `json:"avatar_url"`
@@ -26,6 +27,7 @@ type User struct {
 
 type PublicUser struct {
 	ID                int64        `json:"id"`
+	CustomUID         string       `json:"custom_uid,omitempty"`
 	DisplayName       string       `json:"display_name"`
 	AvatarURL         string       `json:"avatar_url"`
 	CoverURL          string       `json:"cover_url"`
@@ -148,6 +150,7 @@ type AvatarFrame struct {
 	Name           string     `json:"name"`
 	Description    string     `json:"description"`
 	Style          string     `json:"style"`
+	ImageURL       string     `json:"image_url"`
 	PrimaryColor   string     `json:"primary_color"`
 	SecondaryColor string     `json:"secondary_color"`
 	PriceCents     int64      `json:"price_cents"`
@@ -163,6 +166,30 @@ type AvatarFrame struct {
 	PurchasedAt    *time.Time `json:"purchased_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type AvatarFrameUploadSettings struct {
+	AllowRegularUpload bool      `json:"allow_regular_upload"`
+	AllowMemberUpload  bool      `json:"allow_member_upload"`
+	CanUpload          bool      `json:"can_upload"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type AvatarFrameSubmission struct {
+	ID              int64      `json:"id"`
+	UserID          int64      `json:"user_id"`
+	UserName        string     `json:"user_name"`
+	UserAvatar      string     `json:"user_avatar"`
+	Name            string     `json:"name"`
+	Description     string     `json:"description"`
+	ImageURL        string     `json:"image_url"`
+	Status          string     `json:"status"`
+	ReviewNote      string     `json:"review_note"`
+	ReviewedBy      int64      `json:"reviewed_by,omitempty"`
+	ReviewedAt      *time.Time `json:"reviewed_at,omitempty"`
+	ApprovedFrameID int64      `json:"approved_frame_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type AdminUser struct {

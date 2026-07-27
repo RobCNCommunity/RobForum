@@ -28,7 +28,9 @@ const style = computed(() => ({
       <img v-if="props.src" :src="props.src" alt="" />
       <AppIcon v-else name="user" :size="Math.max(13, Math.round(props.size * 0.46))" />
     </span>
-    <span v-if="props.frame" class="rf-avatar-frame" :class="`is-${props.frame.style}`" :title="props.frame.name" aria-hidden="true" />
+    <span v-if="props.frame" class="rf-avatar-frame" :class="`is-${props.frame.style}`" :title="props.frame.name" aria-hidden="true">
+      <img v-if="props.frame.style === 'image' && props.frame.image_url" :src="props.frame.image_url" alt="" />
+    </span>
   </span>
 </template>
 
@@ -109,5 +111,14 @@ const style = computed(() => ({
   border: 2px solid var(--rf-frame-secondary);
   border-radius: 50%;
   content: '';
+}
+.rf-avatar-frame.is-image {
+  inset: -10%;
+  border-radius: 0;
+}
+.rf-avatar-frame.is-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 </style>

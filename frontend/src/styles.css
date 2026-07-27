@@ -597,8 +597,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .rf-message-row > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .rf-message-row.mine > div { align-items: flex-end; }
 .rf-message-row small, .rf-message-row time { color: var(--rf-muted); font-size: 11px; }
-.rf-message-row p { margin: 0; padding: 9px 11px; border-radius: 12px; background: var(--rf-bg-subtle); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.rf-message-row.mine p { color: #fff; background: var(--primary); }
+.rf-message-row p { position: relative; margin: 0; padding: 9px 12px; border: 1px solid var(--rf-line); border-radius: 15px 15px 15px 4px; background: var(--rf-bg-subtle); box-shadow: 0 1px 2px rgba(15, 20, 25, .05); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rf-message-row.mine p { border-color: var(--primary); border-radius: 15px 15px 4px 15px; color: #fff; background: var(--primary); }
+.rf-message-row p::before { position: absolute; bottom: -1px; left: -5px; width: 9px; height: 9px; border-bottom: 1px solid var(--rf-line); border-left: 1px solid var(--rf-line); border-bottom-left-radius: 8px; background: var(--rf-bg-subtle); content: ''; transform: skewX(-28deg); }
+.rf-message-row.mine p::before { right: -5px; left: auto; border-right: 1px solid var(--primary); border-bottom-color: var(--primary); border-left: 0; border-bottom-right-radius: 8px; border-bottom-left-radius: 0; background: var(--primary); transform: skewX(28deg); }
 .rf-message-editor { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--rf-line); background: var(--rf-bg); }
 .rf-message-editor textarea { box-sizing: border-box; min-height: 46px; max-height: 92px; resize: none; overflow-y: auto; line-height: 1.45; }
 .rf-message-editor .rf-primary-button { min-width: 82px; min-height: 46px; align-self: end; }

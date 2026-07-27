@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS smtp_settings (
 
 CREATE TABLE IF NOT EXISTS users (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  custom_uid VARCHAR(32) NULL,
   email VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   display_name VARCHAR(80) NOT NULL,
@@ -96,6 +97,7 @@ CREATE TABLE IF NOT EXISTS users (
   roblox_verified TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
+  UNIQUE INDEX uq_users_custom_uid (custom_uid),
   INDEX idx_users_status_created (status, created_at),
   INDEX idx_users_profile_status_created (profile_status, created_at),
   INDEX idx_users_membership_tier (membership_tier_id, membership_expires_at),
@@ -469,6 +471,7 @@ CREATE TABLE IF NOT EXISTS avatar_frames (
   name VARCHAR(80) NOT NULL,
   description VARCHAR(240) NOT NULL DEFAULT '',
   style VARCHAR(24) NOT NULL DEFAULT 'ring',
+  image_url VARCHAR(500) NOT NULL DEFAULT '',
   primary_color VARCHAR(16) NOT NULL DEFAULT '#1d9bf0',
   secondary_color VARCHAR(16) NOT NULL DEFAULT '#8b5cf6',
   price_cents BIGINT NOT NULL DEFAULT 0,
@@ -501,6 +504,33 @@ CREATE TABLE IF NOT EXISTS user_avatar_frame_equipment (
   INDEX idx_avatar_frame_equipment_frame (frame_id),
   CONSTRAINT fk_avatar_frame_equipment_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_avatar_frame_equipment_frame FOREIGN KEY (frame_id) REFERENCES avatar_frames(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS avatar_frame_upload_settings (
+  id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  allow_regular_upload TINYINT(1) NOT NULL DEFAULT 0,
+  allow_member_upload TINYINT(1) NOT NULL DEFAULT 0,
+  updated_at DATETIME(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS avatar_frame_submissions (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  name VARCHAR(80) NOT NULL,
+  description VARCHAR(240) NOT NULL DEFAULT '',
+  image_url VARCHAR(500) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  review_note VARCHAR(500) NOT NULL DEFAULT '',
+  reviewed_by BIGINT NULL,
+  reviewed_at DATETIME(6) NULL,
+  approved_frame_id BIGINT NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_avatar_frame_submissions_status (status, created_at),
+  INDEX idx_avatar_frame_submissions_user (user_id, created_at),
+  CONSTRAINT fk_avatar_frame_submissions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_avatar_frame_submissions_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_avatar_frame_submissions_frame FOREIGN KEY (approved_frame_id) REFERENCES avatar_frames(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS membership_orders (

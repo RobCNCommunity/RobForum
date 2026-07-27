@@ -134,6 +134,7 @@ func (s *Store) migrate() error {
 	}{
 		{table: "resources", name: "price_cents", def: "BIGINT NOT NULL DEFAULT 0"},
 		{table: "resources", name: "sales_count", def: "BIGINT NOT NULL DEFAULT 0"},
+		{table: "users", name: "custom_uid", def: "VARCHAR(32) NULL"},
 		{table: "users", name: "bio", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "users", name: "cover_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "users", name: "profile_status", def: "VARCHAR(24) NOT NULL DEFAULT 'active'"},
@@ -176,6 +177,7 @@ func (s *Store) migrate() error {
 		{table: "notifications", name: "conversation_id", def: "BIGINT NULL"},
 		{table: "comments", name: "parent_id", def: "BIGINT NULL"},
 		{table: "notices", name: "link_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
+		{table: "avatar_frames", name: "image_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn(column.table, column.name, column.def); err != nil {
 			return fmt.Errorf("migration column %s.%s failed: %w", column.table, column.name, err)
@@ -192,6 +194,7 @@ func (s *Store) migrate() error {
 		{table: "email_verifications", name: "idx_email_verifications_expires", def: "INDEX idx_email_verifications_expires (expires_at)"},
 		{table: "comments", name: "idx_comments_author", def: "INDEX idx_comments_author (author_id, status, post_id)"},
 		{table: "comments", name: "idx_comments_parent", def: "INDEX idx_comments_parent (parent_id, status, created_at)"},
+		{table: "users", name: "uq_users_custom_uid", def: "UNIQUE INDEX uq_users_custom_uid (custom_uid)"},
 		{table: "users", name: "idx_users_status_created", def: "INDEX idx_users_status_created (status, created_at)"},
 		{table: "users", name: "idx_users_profile_status_created", def: "INDEX idx_users_profile_status_created (profile_status, created_at)"},
 		{table: "posts", name: "idx_posts_status_updated", def: "INDEX idx_posts_status_updated (status, updated_at)"},
@@ -897,7 +900,7 @@ func getUser(queryer rowQueryer, id int64) (domain.User, error) {
 	var blueVerified, robloxVerified int
 	var membershipTierID sql.NullInt64
 	var membershipStartedAt, membershipExpiresAt sql.NullTime
-	err := queryer.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE id = ?`, id).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	err := queryer.QueryRow(`SELECT id, COALESCE(custom_uid, ''), email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE id = ?`, id).Scan(&user.ID, &user.CustomUID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
 	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
@@ -922,7 +925,7 @@ func (s *Store) GetUserByEmail(email string) (domain.User, error) {
 	var blueVerified, robloxVerified int
 	var membershipTierID sql.NullInt64
 	var membershipStartedAt, membershipExpiresAt sql.NullTime
-	err := s.db.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, COALESCE(custom_uid, ''), email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.CustomUID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	user.BlueVerified = blueVerified != 0
 	user.RobloxVerified = robloxVerified != 0
 	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
@@ -938,7 +941,7 @@ func (s *Store) VerifyPassword(email, password string) (domain.User, error) {
 	var blueVerified, robloxVerified int
 	var membershipTierID sql.NullInt64
 	var membershipStartedAt, membershipExpiresAt sql.NullTime
-	queryErr := s.db.QueryRow(`SELECT id, email, password_hash, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &hash, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	queryErr := s.db.QueryRow(`SELECT id, COALESCE(custom_uid, ''), email, password_hash, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ?`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.CustomUID, &user.Email, &hash, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	passwordHash := dummyPasswordHash
 	if queryErr == nil {
 		passwordHash = []byte(hash)
@@ -990,7 +993,7 @@ func (s *Store) UserBySession(token string) (domain.User, error) {
 	var blueVerified, robloxVerified int
 	var membershipTierID sql.NullInt64
 	var membershipStartedAt, membershipExpiresAt sql.NullTime
-	err := s.db.QueryRow(`SELECT u.id, u.email, u.display_name, u.avatar_url, u.cover_url, u.bio, u.role, u.status, u.blue_verified, u.verification_label, u.membership_tier_id, u.membership_started_at, u.membership_expires_at, u.roblox_name, u.roblox_id, u.roblox_verified, u.created_at FROM auth_sessions a JOIN users u ON u.id = a.user_id WHERE a.token_hash = ? AND a.expires_at > ? AND u.status = 'active'`, hash[:], time.Now().UTC()).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
+	err := s.db.QueryRow(`SELECT u.id, COALESCE(u.custom_uid, ''), u.email, u.display_name, u.avatar_url, u.cover_url, u.bio, u.role, u.status, u.blue_verified, u.verification_label, u.membership_tier_id, u.membership_started_at, u.membership_expires_at, u.roblox_name, u.roblox_id, u.roblox_verified, u.created_at FROM auth_sessions a JOIN users u ON u.id = a.user_id WHERE a.token_hash = ? AND a.expires_at > ? AND u.status = 'active'`, hash[:], time.Now().UTC()).Scan(&user.ID, &user.CustomUID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt)
 	if err != nil {
 		return domain.User{}, errors.New("session expired")
 	}
@@ -1026,7 +1029,7 @@ func (s *Store) CreateResetToken(email string) (string, domain.User, error) {
 	var blueVerified, robloxVerified int
 	var membershipTierID sql.NullInt64
 	var membershipStartedAt, membershipExpiresAt sql.NullTime
-	if err := tx.QueryRow(`SELECT id, email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ? FOR UPDATE`, email).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt); err != nil {
+	if err := tx.QueryRow(`SELECT id, COALESCE(custom_uid, ''), email, display_name, avatar_url, cover_url, bio, role, status, blue_verified, verification_label, membership_tier_id, membership_started_at, membership_expires_at, roblox_name, roblox_id, roblox_verified, created_at FROM users WHERE email = ? FOR UPDATE`, email).Scan(&user.ID, &user.CustomUID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &user.Role, &user.Status, &blueVerified, &user.VerificationLabel, &membershipTierID, &membershipStartedAt, &membershipExpiresAt, &user.RobloxName, &user.RobloxID, &robloxVerified, &user.CreatedAt); err != nil {
 		return "", domain.User{}, err
 	}
 	if user.Status != "active" {

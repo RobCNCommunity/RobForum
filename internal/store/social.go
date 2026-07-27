@@ -35,20 +35,21 @@ func (s *Store) SearchUsersPage(query string, limit, offset int, hotOnly bool) (
 		offset = 0
 	}
 	where := `u.status = 'active' AND u.profile_status = 'active'`
-	args := make([]any, 0, 5)
+	args := make([]any, 0, 6)
 	if query != "" {
-		where += ` AND (u.display_name LIKE ? ESCAPE '\\' OR u.roblox_name LIKE ? ESCAPE '\\')`
+		where += ` AND (u.display_name LIKE ? ESCAPE '\\' OR u.roblox_name LIKE ? ESCAPE '\\' OR u.custom_uid LIKE ? ESCAPE '\\')`
 		pattern := "%" + escapeLike(query) + "%"
-		args = append(args, pattern, pattern)
+		args = append(args, pattern, pattern, pattern)
 	}
 	order := `hot_score DESC, u.created_at DESC`
 	if !hotOnly && query != "" {
-		order = `CASE WHEN u.display_name = ? THEN 0 ELSE 1 END, hot_score DESC, u.created_at DESC`
+		order = `CASE WHEN u.custom_uid = ? THEN 0 WHEN u.display_name = ? THEN 1 ELSE 2 END, hot_score DESC, u.created_at DESC`
+		args = append(args, strings.ToLower(query))
 		args = append(args, query)
 	}
 	args = append(args, limit+1, offset)
 	rows, err := s.db.Query(`SELECT
-		u.id, u.display_name, u.avatar_url, u.cover_url, u.bio, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END,
+		u.id, COALESCE(u.custom_uid, ''), u.display_name, u.avatar_url, u.cover_url, u.bio, u.blue_verified, u.verification_label, COALESCE(u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN u.membership_tier_id IS NOT NULL AND u.membership_expires_at > UTC_TIMESTAMP() THEN u.membership_tier_id ELSE 0 END,
 		u.roblox_name, u.roblox_verified, u.created_at,
 		(SELECT COUNT(*) FROM posts p JOIN boards pb ON pb.id = p.board_id WHERE p.author_id = u.id AND p.status = 'published' AND pb.status = 'active') AS post_count,
 		(SELECT COUNT(*) FROM resources r WHERE r.creator_id = u.id AND r.status = 'approved') AS resource_count,
@@ -66,7 +67,7 @@ func (s *Store) SearchUsersPage(query string, limit, offset int, hotOnly bool) (
 	for rows.Next() {
 		var item domain.UserSearchResult
 		var blue, member, roblox int
-		if err := rows.Scan(&item.ID, &item.DisplayName, &item.AvatarURL, &item.CoverURL, &item.Bio, &blue, &item.VerificationLabel, &member, &item.MembershipTierID, &item.RobloxName, &roblox, &item.CreatedAt, &item.PostCount, &item.ResourceCount, &item.HotScore); err != nil {
+		if err := rows.Scan(&item.ID, &item.CustomUID, &item.DisplayName, &item.AvatarURL, &item.CoverURL, &item.Bio, &blue, &item.VerificationLabel, &member, &item.MembershipTierID, &item.RobloxName, &roblox, &item.CreatedAt, &item.PostCount, &item.ResourceCount, &item.HotScore); err != nil {
 			return domain.UserSearchPage{}, err
 		}
 		item.BlueVerified = blue != 0

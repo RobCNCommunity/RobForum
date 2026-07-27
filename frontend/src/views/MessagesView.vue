@@ -64,6 +64,8 @@ const groupEditName = ref('')
 const inviteLink = ref<ConversationInviteLink | null>(null)
 const messageList = ref<HTMLElement | null>(null)
 const messageInput = ref<HTMLTextAreaElement | null>(null)
+const messageSoundEnabled = ref(typeof window === 'undefined' || window.localStorage.getItem('rf-message-sound') !== 'off')
+let messageAudioContext: AudioContext | null = null
 
 const selected = computed(() => conversations.value.find((item) => item.id === selectedID.value) || null)
 const selectedPeer = computed(() => selected.value?.members.find((member) => member.id !== auth.user?.id))
@@ -124,6 +126,7 @@ function mergeMessages(primary: readonly ChatMessage[], secondary: readonly Chat
 
 function receiveMessage(message: ChatMessage) {
   if (message.conversation_id !== selectedID.value) return
+  const isNewIncoming = message.sender_id !== auth.user?.id && !messages.value.some((item) => item.id === message.id)
   messages.value = mergeMessages(messages.value, [message])
   const conversation = conversations.value.find((item) => item.id === message.conversation_id)
   if (conversation) {
@@ -132,7 +135,39 @@ function receiveMessage(message: ChatMessage) {
     conversation.unread_count = 0
     conversations.value = [conversation, ...conversations.value.filter((item) => item.id !== conversation.id)]
   }
+  if (isNewIncoming) playMessageSound()
   void scrollToLatest()
+}
+
+function playMessageSound() {
+  if (!messageSoundEnabled.value || typeof window === 'undefined') return
+  try {
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextClass) return
+    messageAudioContext ||= new AudioContextClass()
+    const context = messageAudioContext
+    const start = context.currentTime
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(720, start)
+    oscillator.frequency.exponentialRampToValueAtTime(520, start + 0.13)
+    gain.gain.setValueAtTime(0.0001, start)
+    gain.gain.exponentialRampToValueAtTime(0.1, start + 0.018)
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16)
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start(start)
+    oscillator.stop(start + 0.17)
+  } catch {
+    // Audio can be blocked until the browser receives a user gesture.
+  }
+}
+
+function toggleMessageSound() {
+  messageSoundEnabled.value = !messageSoundEnabled.value
+  window.localStorage.setItem('rf-message-sound', messageSoundEnabled.value ? 'on' : 'off')
+  if (messageSoundEnabled.value) playMessageSound()
 }
 
 function resizeMessageInput() {
@@ -544,6 +579,9 @@ onMounted(loadConversations)
             <span><strong>{{ selectedTitle }}</strong><i v-if="selected" class="rf-stream-state" :class="streamStatus" role="status" :aria-label="streamStatusLabel" :title="streamStatusLabel" /></span>
             <small v-if="selected">{{ selectedStatus }}</small>
           </div>
+          <button v-if="selected" type="button" class="rf-icon-button rf-message-sound-toggle" :aria-label="messageSoundEnabled ? '关闭消息提示音' : '开启消息提示音'" :title="messageSoundEnabled ? '关闭消息提示音' : '开启消息提示音'" :aria-pressed="messageSoundEnabled" @click="toggleMessageSound">
+            <AppIcon :name="messageSoundEnabled ? 'soundOn' : 'soundOff'" size="18" />
+          </button>
           <button v-if="selected?.kind === 'group'" type="button" class="rf-text-button rf-group-manage-trigger" @click="openGroupManager">
             <AppIcon name="settings" size="17" />
             <span>{{ canManageGroup ? '管理群聊' : '群成员' }}</span>
@@ -685,6 +723,7 @@ onMounted(loadConversations)
 .rf-conversation-invites { border-bottom: 1px solid var(--rf-line); background: color-mix(in srgb, var(--primary) 3%, var(--rf-bg)); }.rf-conversation-section-label { display: flex; align-items: center; gap: 6px; padding: 11px 12px 7px; color: var(--rf-muted); font-size: 12px; }.rf-conversation-section-label strong { color: var(--rf-text); }.rf-conversation-section-label span { display: inline-grid; min-width: 18px; height: 18px; margin-left: auto; place-items: center; border-radius: 50%; color: #fff; background: var(--primary); font-size: 10px; font-variant-numeric: tabular-nums; }
 .rf-invite-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 8px 12px 11px; }.rf-invite-row > div { min-width: 0; }.rf-invite-row strong, .rf-invite-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.rf-invite-row small { margin-top: 2px; color: var(--rf-muted); font-size: 11px; }.rf-invite-actions { grid-column: 2; display: flex; gap: 8px; }.rf-invite-actions button { min-height: 29px; padding: 0 10px; border-radius: var(--rf-pill); color: var(--primary); background: transparent; font-size: 12px; font-weight: 700; }.rf-invite-actions button:last-child { color: #fff; background: var(--primary); }.rf-invite-actions button:disabled { cursor: wait; opacity: .55; }
 .rf-chat-group-mark { display: inline-grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: 50%; color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--rf-bg)); }.rf-chat-heading { display: flex; min-width: 0; flex: 1; flex-direction: column; }.rf-chat-heading > span { display: flex; min-width: 0; align-items: center; gap: 7px; }.rf-chat-heading strong, .rf-chat-heading small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.rf-chat-heading small { color: var(--rf-muted); font-size: 11px; }.rf-stream-state { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--rf-faint); }.rf-stream-state.open { background: var(--rf-success); }.rf-stream-state.connecting, .rf-stream-state.reconnecting { background: var(--primary); }.rf-group-manage-trigger { min-height: 34px; flex: 0 0 auto; gap: 5px; padding-inline: 10px; font-size: 12px; }
+.rf-message-sound-toggle { width: 34px; height: 34px; flex: 0 0 34px; color: var(--rf-muted); }.rf-message-sound-toggle[aria-pressed='true'] { color: var(--primary); }
 .rf-group-pending-message { display: grid; width: min(100%, 520px); grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; margin: 0 auto 5px; padding: 11px 13px; border-radius: 9px; color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, transparent); }.rf-group-pending-message > svg { flex: 0 0 auto; margin-top: 2px; }.rf-group-pending-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.rf-group-pending-message strong { font-size: 13px; }.rf-group-pending-copy > span { color: var(--rf-muted); font-size: 12px; line-height: 1.45; }.rf-group-remind-button { min-height: 30px; gap: 5px; padding: 0 9px; color: var(--primary); font-size: 12px; white-space: nowrap; }.rf-group-remind-button:disabled { cursor: wait; opacity: .6; }.rf-inline-spinner { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent); border-top-color: var(--primary); border-radius: 50%; animation: rf-group-spin .7s linear infinite; }.rf-message-empty { min-height: 200px; padding-top: 32px; }
 .rf-message-editor .rf-primary-button { gap: 6px; padding-inline: 14px; }.rf-group-dialog > form { padding: 18px 20px 22px; }.rf-group-dialog > header p { margin: 3px 0 0; color: var(--rf-muted); font-size: 12px; }.rf-group-dialog .rf-feed-search { display: flex; margin-top: 7px; }.rf-group-selection { margin: 0; color: var(--rf-muted); font-size: 12px; }.rf-member-picker-scroll { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--rf-line); border-radius: 10px; background: var(--rf-bg); }.rf-member-picker { max-height: none; padding: 5px; overflow: visible; }.rf-member-picker button { min-height: 48px; }.rf-member-picker button > span { display: flex; min-width: 0; overflow: hidden; flex: 1; flex-direction: column; text-overflow: ellipsis; white-space: nowrap; }.rf-member-picker button strong, .rf-member-picker button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.rf-member-picker button small { color: var(--rf-muted); font-size: 11px; font-weight: 400; }.rf-member-picker button > :deep(svg) { flex: 0 0 auto; color: var(--primary); }.rf-member-picker-empty, .rf-member-picker-loading { display: flex; min-height: 74px; align-items: center; justify-content: center; gap: 7px; color: var(--rf-muted); font-size: 12px; }.rf-member-picker-scroll :deep(.nut-infinite-top) { color: var(--rf-muted); background: var(--rf-bg); }.rf-group-submit { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }.rf-button-spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.44); border-top-color: #fff; border-radius: 50%; animation: rf-group-spin .7s linear infinite; }
 .rf-group-manager { min-height: 100%; padding: 22px 18px calc(24px + env(safe-area-inset-bottom)); color: var(--rf-text); background: var(--rf-bg); }.rf-group-manager > header { padding: 0 32px 16px 0; border-bottom: 1px solid var(--rf-line); }.rf-group-manager h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }.rf-group-manager > header p { margin: 4px 0 0; color: var(--rf-muted); font-size: 12px; }.rf-group-name-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; padding: 17px 0; border-bottom: 1px solid var(--rf-line); }.rf-group-name-form label { display: flex; min-width: 0; flex-direction: column; gap: 7px; color: var(--rf-muted); font-size: 12px; font-weight: 600; }.rf-group-name-form input, .rf-group-link-box input { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid var(--rf-line); border-radius: 7px; outline: 0; color: var(--rf-text); background: var(--rf-bg-subtle); }.rf-group-name-form input:focus, .rf-group-link-box input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }.rf-group-manager-actions { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--rf-line); }.rf-group-manager-actions :deep(.nut-button) { justify-content: flex-start; gap: 7px; }.rf-group-link-box { display: flex; flex-direction: column; gap: 9px; padding: 16px 0; border-bottom: 1px solid var(--rf-line); }.rf-group-link-box > div:first-child { display: flex; flex-direction: column; gap: 3px; }.rf-group-link-box small { color: var(--rf-muted); font-size: 11px; line-height: 1.45; }.rf-group-link-box > div:last-child { display: flex; gap: 8px; }.rf-group-members > header { display: flex; min-height: 48px; align-items: center; justify-content: space-between; }.rf-group-members > header span { color: var(--rf-muted); font-size: 12px; }.rf-group-members article { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 62px; border-top: 1px solid var(--rf-line); }.rf-group-members article > div { display: flex; min-width: 0; flex-direction: column; }.rf-group-members article strong, .rf-group-members article small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.rf-group-members article small { color: var(--rf-muted); font-size: 11px; }.rf-group-remove { min-height: 32px; padding: 0 8px; border-radius: var(--rf-pill); color: var(--rf-danger); background: transparent; font-size: 12px; font-weight: 700; }.rf-group-remove:hover { background: color-mix(in srgb, var(--rf-danger) 8%, transparent); }.rf-group-remove:disabled { cursor: wait; opacity: .55; }.rf-group-danger-actions { padding-top: 22px; }.rf-group-danger-actions :deep(.nut-button--plain.nut-button--danger) { color: var(--rf-danger); border-color: color-mix(in srgb, var(--rf-danger) 45%, var(--rf-line)); background: transparent; }

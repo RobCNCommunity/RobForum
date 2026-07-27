@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
-import { deleteMyCover, errorMessage, updateMyProfile, uploadMyAvatar, uploadMyCover } from '@/api'
+import { deleteMyCover, errorMessage, updateMyProfile, updateMyUID, uploadMyAvatar, uploadMyCover } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -15,6 +15,7 @@ const router = useRouter()
 const avatarInput = ref<HTMLInputElement | null>(null)
 const coverInput = ref<HTMLInputElement | null>(null)
 const form = reactive({
+  custom_uid: auth.user?.custom_uid || '',
   display_name: auth.user?.display_name || '',
   bio: auth.user?.bio || '',
 })
@@ -27,7 +28,10 @@ const saving = ref(false)
 
 const currentAvatar = computed(() => avatarPreview.value || auth.user?.avatar_url || '')
 const currentCover = computed(() => coverPreview.value || (coverRemoved.value ? '' : auth.user?.cover_url || ''))
-const canSave = computed(() => form.display_name.trim().length >= 2 && !saving.value)
+const normalizedUID = computed(() => form.custom_uid.trim().toLowerCase())
+const uidChanged = computed(() => normalizedUID.value !== (auth.user?.custom_uid || ''))
+const uidValid = computed(() => !uidChanged.value || /^[a-z0-9_]{4,32}$/.test(normalizedUID.value))
+const canSave = computed(() => form.display_name.trim().length >= 2 && uidValid.value && !saving.value)
 const acceptedImageTypes = computed(() => auth.user?.member_active ? 'image/jpeg,image/png,image/gif' : 'image/jpeg,image/png')
 
 function revokePreview(value: string) {
@@ -83,8 +87,17 @@ async function saveProfile() {
     Notify.warn('昵称至少需要 2 个字符')
     return
   }
+  if (!uidValid.value) {
+    Notify.warn('UID 需要使用 4 到 32 位英文字母、数字或下划线')
+    return
+  }
   saving.value = true
   try {
+    if (uidChanged.value) {
+      const user = await updateMyUID(normalizedUID.value)
+      auth.setUser(user)
+      form.custom_uid = user.custom_uid || ''
+    }
     auth.setUser(await updateMyProfile({ display_name: displayName, bio: form.bio.trim() }))
     if (avatarFile.value) auth.setUser(await uploadMyAvatar(avatarFile.value))
     if (coverFile.value) auth.setUser(await uploadMyCover(coverFile.value))
@@ -147,6 +160,11 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="rf-x-edit-fields">
+        <label class="rf-x-edit-field">
+          <span>UID</span>
+          <small>{{ normalizedUID.length }}/32</small>
+          <input v-model="form.custom_uid" maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="注册后可设置，例如 roblox_player" />
+        </label>
         <label class="rf-x-edit-field">
           <span>名称</span>
           <small>{{ form.display_name.length }}/80</small>

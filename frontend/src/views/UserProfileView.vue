@@ -44,8 +44,8 @@ const isMe = computed(() => !!profile.value && auth.user?.id === profile.value.u
 const postCountLabel = computed(() => `${profile.value?.posts.length || 0} 条动态`)
 const profileHandle = computed(() => profile.value ? userHandle(profile.value.user) : '')
 
-function userHandle(user: Pick<PublicUser, 'id' | 'roblox_name'>) {
-  const candidate = (user.roblox_name || '').trim().replace(/\s+/g, '_')
+function userHandle(user: Pick<PublicUser, 'id' | 'custom_uid' | 'roblox_name'>) {
+	const candidate = (user.custom_uid || user.roblox_name || '').trim().replace(/\s+/g, '_')
   return `@${candidate || `user_${user.id}`}`
 }
 
@@ -332,7 +332,8 @@ onMounted(load)
 .rf-x-profile-cover { width: 100%; aspect-ratio: 3 / 1; overflow: hidden; background: #cfd9de; }
 .rf-x-profile-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .rf-x-profile-action-row { position: relative; display: flex; min-height: 64px; align-items: flex-start; justify-content: flex-end; padding: 12px 16px 0; }
-.rf-x-profile-avatar { position: absolute; bottom: 10px; left: 16px; width: 104px !important; height: 104px !important; flex-basis: 104px !important; border: 4px solid var(--rf-bg); background: var(--rf-bg-subtle); box-shadow: none !important; }
+.rf-x-profile-avatar { position: absolute; bottom: 10px; left: 16px; width: 104px !important; height: 104px !important; min-width: 104px !important; min-height: 104px !important; max-width: 104px !important; max-height: 104px !important; flex-basis: 104px !important; border: 0; border-radius: 50%; background: transparent; box-shadow: none !important; }
+.rf-x-profile-avatar :deep(.rf-user-avatar-image) { border-radius: 50%; box-shadow: 0 0 0 4px var(--rf-bg), inset 0 0 0 1px var(--rf-line); }
 .rf-x-profile-actions { display: flex; min-height: 44px; align-items: center; justify-content: flex-end; gap: 8px; }
 .rf-x-outline-button, .rf-x-follow-button { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; padding: 0 17px; border: 1px solid var(--rf-faint); border-radius: var(--rf-pill); color: var(--rf-text); background: var(--rf-bg); font-size: 14px; font-weight: 700; transition: background-color 150ms ease-out, border-color 150ms ease-out, transform 100ms ease-out; }
 .rf-x-outline-button:hover, .rf-x-follow-button.following:hover { color: var(--rf-text); background: var(--rf-bg-hover); }
@@ -420,7 +421,8 @@ onMounted(load)
   .rf-x-profile-header { padding-inline: 10px; }
   .rf-x-profile-cover { aspect-ratio: 3 / 1; }
   .rf-x-profile-action-row { min-height: 54px; padding: 10px 12px 0; }
-  .rf-x-profile-avatar { bottom: 7px; left: 12px; width: 80px !important; height: 80px !important; flex-basis: 80px !important; border-width: 3px; }
+  .rf-x-profile-avatar { bottom: 7px; left: 12px; width: 80px !important; height: 80px !important; min-width: 80px !important; min-height: 80px !important; max-width: 80px !important; max-height: 80px !important; flex-basis: 80px !important; }
+  .rf-x-profile-avatar :deep(.rf-user-avatar-image) { box-shadow: 0 0 0 3px var(--rf-bg), inset 0 0 0 1px var(--rf-line); }
   .rf-x-profile-loading-body > span { width: 80px; height: 80px; margin-top: -40px; border-width: 3px; }
   .rf-x-profile-actions { gap: 6px; }
   .rf-x-profile-copy { padding: 0 12px 15px; }

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"roblox-community/internal/store"
 )
 
 const (
@@ -52,6 +53,27 @@ func (s *Server) updateMyProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, user)
+}
+
+func (s *Server) updateMyUID(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		UID string `json:"uid"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	user, err := s.store.UpdateUserCustomUID(currentUser(r).ID, input.UID)
+	if err != nil {
+		status := http.StatusBadRequest
+		code := "uid_update_failed"
+		if errors.Is(err, store.ErrCustomUIDTaken) {
+			status = http.StatusConflict
+			code = "uid_taken"
+		}
+		writeError(w, status, code, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
 }
 
 func (s *Server) uploadMyAvatar(w http.ResponseWriter, r *http.Request) {

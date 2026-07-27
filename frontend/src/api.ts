@@ -67,7 +67,8 @@ export interface AvatarFrame {
   id: number
   name: string
   description: string
-  style: 'ring' | 'double' | 'glow' | 'pixel' | 'halo'
+  style: 'ring' | 'double' | 'glow' | 'pixel' | 'halo' | 'image'
+  image_url: string
   primary_color: string
   secondary_color: string
   price_cents: number
@@ -85,8 +86,33 @@ export interface AvatarFrame {
   updated_at: string
 }
 
+export interface AvatarFrameUploadSettings {
+  allow_regular_upload: boolean
+  allow_member_upload: boolean
+  can_upload: boolean
+  updated_at: string
+}
+
+export interface AvatarFrameSubmission {
+  id: number
+  user_id: number
+  user_name: string
+  user_avatar: string
+  name: string
+  description: string
+  image_url: string
+  status: 'pending' | 'approved' | 'rejected'
+  review_note: string
+  reviewed_by?: number
+  reviewed_at?: string
+  approved_frame_id?: number
+  created_at: string
+  updated_at: string
+}
+
 export interface User {
   id: number
+  custom_uid?: string
   email: string
   display_name: string
   avatar_url: string
@@ -119,7 +145,7 @@ export interface Comment { id: number; post_id: number; parent_id?: number; auth
 export interface ResourceFile { id: number; resource_id: number; original_name: string; mime_type: string; size_bytes: number; sha256: string; created_at: string }
 export interface ResourceMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
 export interface Resource { id: number; creator_id: number; creator_name: string; creator_verified: boolean; creator_verification_label?: string; creator_member: boolean; creator_membership_tier_id?: number; title: string; description: string; game: string; version: string; resource_type: string; price_cents: number; status: string; review_reason?: string; download_count: number; sales_count: number; file?: ResourceFile; media?: ResourceMedia[]; created_at: string; updated_at: string }
-export interface PublicUser { id: number; display_name: string; avatar_url: string; cover_url: string; bio: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; avatar_frame?: AvatarFrame; roblox_name?: string; roblox_verified: boolean; created_at: string; progress: UserProgress; badges: Badge[] }
+export interface PublicUser { id: number; custom_uid?: string; display_name: string; avatar_url: string; cover_url: string; bio: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; avatar_frame?: AvatarFrame; roblox_name?: string; roblox_verified: boolean; created_at: string; progress: UserProgress; badges: Badge[] }
 export interface AdminUser { id: number; email: string; display_name: string; avatar_url: string; role: string; status: string; blue_verified: boolean; verification_label?: string; member_active: boolean; membership_tier_id?: number; membership_expires_at?: string; post_count: number; comment_count: number; resource_count: number; created_at: string; updated_at: string }
 export interface UserProfile { user: PublicUser; posts: Post[]; resources: Resource[]; follower_count: number; following_count: number; following: boolean }
 export interface UserSearchResult extends PublicUser { post_count: number; resource_count: number; hot_score: number }
@@ -219,6 +245,15 @@ export async function fetchAvatarFrames() { return data<AvatarFrame[]>(await api
 export async function purchaseAvatarFrame(id: number) { return data<AvatarFrame>(await api.post(`/avatar-frames/${id}/purchase`)) }
 export async function equipAvatarFrame(frameId: number) { return data<{ avatar_frame: AvatarFrame | null }>(await api.put('/me/avatar-frame', { frame_id: frameId })) }
 export async function fetchAdminAvatarFrames() { return data<AvatarFrame[]>(await api.get('/admin/avatar-frames')) }
+export async function uploadAdminAvatarFrameImage(file: File) { const form = new FormData(); form.append('file', file); return data<{ image_url: string }>(await api.post('/admin/avatar-frames/image', form)) }
+export async function fetchAvatarFrameUploadSettings() { return data<AvatarFrameUploadSettings>(await api.get('/avatar-frame-upload-settings')) }
+export async function fetchAdminAvatarFrameUploadSettings() { return data<AvatarFrameUploadSettings>(await api.get('/admin/avatar-frame-upload-settings')) }
+export async function updateAdminAvatarFrameUploadSettings(input: Pick<AvatarFrameUploadSettings, 'allow_regular_upload' | 'allow_member_upload'>) { return data<AvatarFrameUploadSettings>(await api.put('/admin/avatar-frame-upload-settings', input)) }
+export async function uploadAvatarFrameSubmissionImage(file: File) { const form = new FormData(); form.append('file', file); return data<{ image_url: string }>(await api.post('/avatar-frames/image', form)) }
+export async function createAvatarFrameSubmission(input: { name: string; description: string; image_url: string }) { return data<AvatarFrameSubmission>(await api.post('/avatar-frame-submissions', input)) }
+export async function fetchMyAvatarFrameSubmissions() { return data<AvatarFrameSubmission[]>(await api.get('/me/avatar-frame-submissions')) }
+export async function fetchAdminAvatarFrameSubmissions(status = 'pending') { return data<AvatarFrameSubmission[]>(await api.get('/admin/avatar-frame-submissions', { params: { status } })) }
+export async function reviewAdminAvatarFrameSubmission(id: number, status: 'approved' | 'rejected', note = '') { return data<AvatarFrameSubmission>(await api.patch(`/admin/avatar-frame-submissions/${id}`, { status, note })) }
 export async function createAdminAvatarFrame(input: Omit<AvatarFrame, 'id' | 'sales_count' | 'owned' | 'equipped' | 'can_use' | 'purchased_at' | 'created_at' | 'updated_at'>) { return data<AvatarFrame>(await api.post('/admin/avatar-frames', input)) }
 export async function updateAdminAvatarFrame(id: number, input: Omit<AvatarFrame, 'id' | 'sales_count' | 'owned' | 'equipped' | 'can_use' | 'purchased_at' | 'created_at' | 'updated_at'>) { return data<AvatarFrame>(await api.put(`/admin/avatar-frames/${id}`, input)) }
 export async function deleteAdminAvatarFrame(id: number) { return data<{ disabled: boolean }>(await api.delete(`/admin/avatar-frames/${id}`)) }
@@ -281,6 +316,7 @@ export async function login(input: { email: string; password: string; captcha_to
 export async function logout() { return data<{ logged_out: boolean }>(await api.post('/auth/logout')) }
 export async function fetchMe() { return data<User>(await api.get('/me')) }
 export async function updateMyProfile(input: { display_name: string; bio: string }) { return data<User>(await api.patch('/me/profile', input)) }
+export async function updateMyUID(uid: string) { return data<User>(await api.patch('/me/uid', { uid })) }
 export async function uploadMyAvatar(file: File) { const form = new FormData(); form.append('file', file); return data<User>(await api.post('/me/avatar', form)) }
 export async function uploadMyCover(file: File) { const form = new FormData(); form.append('file', file); return data<User>(await api.post('/me/cover', form)) }
 export async function deleteMyCover() { return data<User>(await api.delete('/me/cover')) }

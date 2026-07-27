@@ -62,6 +62,8 @@ import {
   TriangleAlert,
   Upload,
   Video,
+  Volume2,
+  VolumeX,
   UserRoundPlus,
   UsersRound,
   WalletCards,
@@ -137,6 +139,8 @@ const icons: Record<string, Component> = {
   quote: Quote,
   pen: PenLine,
   plainCheck: Check,
+  soundOn: Volume2,
+  soundOff: VolumeX,
 }
 
 const component = computed<Component>(() => icons[props.name] || CircleEllipsis)

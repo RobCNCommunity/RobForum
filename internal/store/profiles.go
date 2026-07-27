@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -10,6 +11,50 @@ import (
 )
 
 var ErrProfileUnavailable = errors.New("个人资料正在审核中，暂时无法修改")
+var ErrCustomUIDTaken = errors.New("该 UID 已被其他用户使用")
+
+var customUIDPattern = regexp.MustCompile(`^[a-z0-9_]{4,32}$`)
+
+func normalizeCustomUID(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if !customUIDPattern.MatchString(value) {
+		return "", errors.New("UID 需要使用 4 到 32 位英文字母、数字或下划线")
+	}
+	return value, nil
+}
+
+func (s *Store) UpdateUserCustomUID(userID int64, value string) (domain.User, error) {
+	customUID, err := normalizeCustomUID(value)
+	if err != nil {
+		return domain.User{}, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return domain.User{}, err
+	}
+	defer tx.Rollback()
+	var status, profileStatus string
+	if err := tx.QueryRow(`SELECT status, profile_status FROM users WHERE id = ? FOR UPDATE`, userID).Scan(&status, &profileStatus); err != nil {
+		return domain.User{}, err
+	}
+	if status != "active" || profileStatus != "active" {
+		return domain.User{}, ErrProfileUnavailable
+	}
+	if _, err := tx.Exec(`UPDATE users SET custom_uid = ?, updated_at = ? WHERE id = ?`, customUID, time.Now().UTC(), userID); err != nil {
+		if isDuplicateKeyError(err) {
+			return domain.User{}, ErrCustomUIDTaken
+		}
+		return domain.User{}, err
+	}
+	user, err := getUser(tx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
+}
 
 func (s *Store) UpdateUserProfile(userID int64, displayName, bio string) (domain.User, error) {
 	displayName = strings.TrimSpace(displayName)
@@ -108,7 +153,7 @@ func (s *Store) UpdateUserCover(userID int64, coverURL string) (domain.User, err
 func (s *Store) GetPublicUser(userID int64) (domain.PublicUser, error) {
 	var user domain.PublicUser
 	var blueVerified, memberActive, robloxVerified int
-	err := s.db.QueryRow(`SELECT id, display_name, avatar_url, cover_url, bio, blue_verified, verification_label, COALESCE(membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP() THEN membership_tier_id ELSE 0 END, roblox_name, roblox_verified, created_at FROM users WHERE id = ? AND status = 'active' AND profile_status = 'active'`, userID).Scan(&user.ID, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &blueVerified, &user.VerificationLabel, &memberActive, &user.MembershipTierID, &user.RobloxName, &robloxVerified, &user.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, COALESCE(custom_uid, ''), display_name, avatar_url, cover_url, bio, blue_verified, verification_label, COALESCE(membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP(), 0), CASE WHEN membership_tier_id IS NOT NULL AND membership_expires_at > UTC_TIMESTAMP() THEN membership_tier_id ELSE 0 END, roblox_name, roblox_verified, created_at FROM users WHERE id = ? AND status = 'active' AND profile_status = 'active'`, userID).Scan(&user.ID, &user.CustomUID, &user.DisplayName, &user.AvatarURL, &user.CoverURL, &user.Bio, &blueVerified, &user.VerificationLabel, &memberActive, &user.MembershipTierID, &user.RobloxName, &robloxVerified, &user.CreatedAt)
 	if err != nil {
 		return user, err
 	}
