@@ -25,6 +25,7 @@ const router = createRouter({
     { path: '/settings/profile', component: () => import('./views/ProfileSettingsView.vue'), meta: { requiresAuth: true, title: '资料设置' } },
     { path: '/verification/apply', component: () => import('./views/VerificationApplyView.vue'), meta: { requiresAuth: true, title: '蓝微认证' } },
     { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },
+    { path: '/login/2fa', component: () => import('./views/TwoFactorLoginView.vue'), meta: { public: true, title: '两步验证' } },
     { path: '/register', component: () => import('./views/RegisterView.vue'), meta: { public: true, title: '注册' } },
     { path: '/forgot-password', component: () => import('./views/ForgotPasswordView.vue'), meta: { public: true, title: '找回密码' } },
     { path: '/reset-password', component: () => import('./views/ResetPasswordView.vue'), meta: { public: true, title: '重置密码' } },

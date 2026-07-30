@@ -1,7 +1,7 @@
 package app
 
 import (
-	"errors"
+	"bytes"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -55,27 +55,18 @@ func (s *Server) uploadAvatarFrameImage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "avatar_frame_image_type_invalid", "头像框图片仅支持 PNG、JPG 和 GIF")
 		return
 	}
-	firstBytes := make([]byte, 512)
-	readCount, readErr := io.ReadFull(file, firstBytes)
-	if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+	imageBytes, readErr := io.ReadAll(io.LimitReader(file, maxAvatarFrameImageUpload+1))
+	if readErr != nil || len(imageBytes) < 1 || len(imageBytes) > maxAvatarFrameImageUpload {
 		writeError(w, http.StatusBadRequest, "avatar_frame_image_read_failed", "头像框图片读取失败")
 		return
 	}
-	if http.DetectContentType(firstBytes[:readCount]) != expectedMIME {
+	if http.DetectContentType(imageBytes[:min(len(imageBytes), 512)]) != expectedMIME {
 		writeError(w, http.StatusBadRequest, "avatar_frame_image_type_mismatch", "图片内容与文件扩展名不匹配")
 		return
 	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		writeError(w, http.StatusBadRequest, "avatar_frame_image_read_failed", "头像框图片无法重新读取")
-		return
-	}
-	config, _, err := image.DecodeConfig(io.LimitReader(file, maxAvatarFrameImageUpload+1))
+	config, _, err := image.DecodeConfig(bytes.NewReader(imageBytes))
 	if err != nil || config.Width < 32 || config.Height < 32 || config.Width > 4096 || config.Height > 4096 {
 		writeError(w, http.StatusBadRequest, "avatar_frame_image_dimensions_invalid", "头像框图片尺寸必须在 32 × 32 至 4096 × 4096 之间")
-		return
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		writeError(w, http.StatusBadRequest, "avatar_frame_image_read_failed", "头像框图片无法重新读取")
 		return
 	}
 
@@ -95,7 +86,7 @@ func (s *Server) uploadAvatarFrameImage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "avatar_frame_image_upload_failed", "头像框图片保存失败")
 		return
 	}
-	written, copyErr := io.Copy(target, io.LimitReader(file, maxAvatarFrameImageUpload+1))
+	written, copyErr := io.Copy(target, bytes.NewReader(imageBytes))
 	syncErr := target.Sync()
 	closeErr := target.Close()
 	if copyErr != nil || syncErr != nil || closeErr != nil || written == 0 || written > maxAvatarFrameImageUpload {
@@ -103,7 +94,13 @@ func (s *Server) uploadAvatarFrameImage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "avatar_frame_image_upload_failed", "头像框图片为空、过大或保存失败")
 		return
 	}
-	if !s.approveImagePath(w, r, "avatar_frame", targetPath) {
+	moderationBytes, moderationErr := moderationImageBytes(expectedMIME, imageBytes)
+	if moderationErr != nil {
+		_ = os.Remove(targetPath)
+		writeError(w, http.StatusBadRequest, "avatar_frame_image_invalid", "头像框图片无法解析")
+		return
+	}
+	if !s.approveImageBytes(w, r, "avatar_frame", moderationBytes) {
 		_ = os.Remove(targetPath)
 		return
 	}

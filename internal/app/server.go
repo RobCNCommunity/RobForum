@@ -93,6 +93,7 @@ func (s *Server) Router() http.Handler {
 	r.Post("/api/v1/auth/register", s.register)
 	r.Post("/api/v1/auth/register/verification", s.sendRegisterVerification)
 	r.Post("/api/v1/auth/login", s.login)
+	r.Post("/api/v1/auth/login/2fa", s.verifyTwoFactorLogin)
 	r.Post("/api/v1/auth/logout", s.authenticate(http.HandlerFunc(s.logout)).ServeHTTP)
 	r.Post("/api/v1/auth/forgot-password", s.forgotPassword)
 	r.Post("/api/v1/auth/reset-password", s.resetPassword)
@@ -109,6 +110,10 @@ func (s *Server) Router() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.authenticate)
 		r.Get("/api/v1/me", s.me)
+		r.Get("/api/v1/me/2fa", s.twoFactorStatus)
+		r.Post("/api/v1/me/2fa/setup", s.setupTwoFactor)
+		r.Post("/api/v1/me/2fa/confirm", s.confirmTwoFactor)
+		r.Delete("/api/v1/me/2fa", s.disableTwoFactor)
 		r.Patch("/api/v1/me/profile", s.updateMyProfile)
 		r.Patch("/api/v1/me/uid", s.updateMyUID)
 		r.Post("/api/v1/me/avatar", s.uploadMyAvatar)
@@ -204,7 +209,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/v1/admin/captcha", s.adminCaptcha)
 		r.Put("/api/v1/admin/captcha", s.updateCaptcha)
 		r.Get("/api/v1/admin/oauth", s.adminOAuthConfig)
-		r.Put("/api/v1/admin/oauth", s.updateOAuthConfig)
+		r.Post("/api/v1/admin/oauth", s.createOAuthConfig)
+		r.Put("/api/v1/admin/oauth/{providerID}", s.updateOAuthConfig)
+		r.Delete("/api/v1/admin/oauth/{providerID}", s.deleteOAuthConfig)
 		r.Get("/api/v1/admin/resources", s.listAdminResources)
 		r.Patch("/api/v1/admin/resources/{resourceID}", s.reviewResource)
 		r.Get("/api/v1/admin/resources/{resourceID}/download", s.downloadResourceForAdmin)
@@ -457,6 +464,20 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeError(w, 500, "login_failed", "登录服务暂时不可用")
 		}
+		return
+	}
+	twoFactorEnabled, err := s.store.TwoFactorEnabled(user.ID)
+	if err != nil {
+		writeError(w, 500, "login_failed", "登录服务暂时不可用")
+		return
+	}
+	if twoFactorEnabled {
+		challenge, err := s.store.CreateTwoFactorLoginChallenge(user.ID)
+		if err != nil {
+			writeError(w, 500, "two_factor_challenge_failed", "两步验证暂时不可用")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"requires_2fa": true, "challenge_token": challenge})
 		return
 	}
 	token, err := s.store.IssueSession(user.ID)

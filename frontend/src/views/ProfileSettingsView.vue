@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
-import { deleteMyCover, errorMessage, updateMyProfile, updateMyUID, uploadMyAvatar, uploadMyCover } from '@/api'
+import { confirmTwoFactor, deleteMyCover, disableTwoFactor, errorMessage, fetchTwoFactorStatus, setupTwoFactor, updateMyProfile, updateMyUID, uploadMyAvatar, uploadMyCover } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
@@ -25,6 +25,10 @@ const coverFile = ref<File | null>(null)
 const coverPreview = ref('')
 const coverRemoved = ref(false)
 const saving = ref(false)
+const twoFactorEnabled = ref(false)
+const twoFactorSetup = ref<{ secret: string; otpauth_uri: string; qr_data_url: string } | null>(null)
+const twoFactorCode = ref('')
+const twoFactorBusy = ref(false)
 
 const currentAvatar = computed(() => avatarPreview.value || auth.user?.avatar_url || '')
 const currentCover = computed(() => coverPreview.value || (coverRemoved.value ? '' : auth.user?.cover_url || ''))
@@ -81,6 +85,37 @@ function removeCover() {
   if (coverInput.value) coverInput.value.value = ''
 }
 
+async function beginTwoFactor() {
+  twoFactorBusy.value = true
+  try { twoFactorSetup.value = await setupTwoFactor(); twoFactorCode.value = '' }
+  catch (error) { Notify.danger(errorMessage(error, '两步验证设置创建失败')) }
+  finally { twoFactorBusy.value = false }
+}
+
+async function finishTwoFactor() {
+  if (!/^\d{6}$/.test(twoFactorCode.value)) { Notify.warn('请输入 6 位动态验证码'); return }
+  twoFactorBusy.value = true
+  try {
+    await confirmTwoFactor(twoFactorCode.value)
+    twoFactorEnabled.value = true; twoFactorSetup.value = null; twoFactorCode.value = ''
+    if (auth.user) auth.setUser({ ...auth.user, two_factor_enabled: true })
+    Notify.success('两步验证已启用')
+  } catch (error) { Notify.danger(errorMessage(error, '动态验证码不正确')) }
+  finally { twoFactorBusy.value = false }
+}
+
+async function turnOffTwoFactor() {
+  if (!/^\d{6}$/.test(twoFactorCode.value)) { Notify.warn('请输入身份验证器中的 6 位验证码'); return }
+  twoFactorBusy.value = true
+  try {
+    await disableTwoFactor(twoFactorCode.value)
+    twoFactorEnabled.value = false; twoFactorCode.value = ''
+    if (auth.user) auth.setUser({ ...auth.user, two_factor_enabled: false })
+    Notify.success('两步验证已关闭')
+  } catch (error) { Notify.danger(errorMessage(error, '两步验证关闭失败')) }
+  finally { twoFactorBusy.value = false }
+}
+
 async function saveProfile() {
   const displayName = form.display_name.trim()
   if (displayName.length < 2) {
@@ -124,6 +159,7 @@ onBeforeUnmount(() => {
   revokePreview(avatarPreview.value)
   revokePreview(coverPreview.value)
 })
+onMounted(async () => { try { twoFactorEnabled.value = (await fetchTwoFactorStatus()).enabled } catch { twoFactorEnabled.value = !!auth.user?.two_factor_enabled } })
 </script>
 
 <template>
@@ -188,6 +224,21 @@ onBeforeUnmount(() => {
         </span>
         <AppIcon name="arrow" size="17" />
       </button>
+
+      <section class="rf-two-factor-settings">
+        <div><strong>两步验证</strong><p>{{ twoFactorEnabled ? '登录时需要身份验证器动态验证码' : '使用 Microsoft Authenticator 等应用保护账号' }}</p></div>
+        <button v-if="!twoFactorEnabled && !twoFactorSetup" type="button" :disabled="twoFactorBusy" @click="beginTwoFactor">启用</button>
+        <template v-if="twoFactorSetup">
+          <img :src="twoFactorSetup.qr_data_url" alt="两步验证二维码" />
+          <p class="rf-two-factor-secret">无法扫码时输入：<code>{{ twoFactorSetup.secret }}</code></p>
+          <input v-model="twoFactorCode" inputmode="numeric" maxlength="6" placeholder="6 位动态验证码" />
+          <button type="button" :disabled="twoFactorBusy" @click="finishTwoFactor">确认启用</button>
+        </template>
+        <template v-else-if="twoFactorEnabled">
+          <input v-model="twoFactorCode" inputmode="numeric" maxlength="6" placeholder="输入动态验证码后关闭" />
+          <button type="button" class="danger" :disabled="twoFactorBusy" @click="turnOffTwoFactor">关闭</button>
+        </template>
+      </section>
     </form>
   </PageContainer>
 </template>
@@ -226,6 +277,13 @@ onBeforeUnmount(() => {
 .rf-x-verification-row:hover { background: var(--rf-bg-hover); }
 .rf-x-verification-row > span { display: inline-flex; align-items: center; gap: 6px; }
 .rf-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+.rf-two-factor-settings { display: grid; gap: 12px; padding: 18px 16px; border-bottom: 1px solid var(--rf-line); }
+.rf-two-factor-settings p { margin: 4px 0 0; color: var(--rf-muted); font-size: 13px; }
+.rf-two-factor-settings img { width: 180px; height: 180px; border: 1px solid var(--rf-line); }
+.rf-two-factor-settings input { width: min(100%, 260px); height: 42px; padding: 0 12px; border: 1px solid var(--rf-line); border-radius: 4px; color: var(--rf-text); background: var(--rf-bg); }
+.rf-two-factor-settings button { width: fit-content; min-height: 38px; padding: 0 16px; border-radius: 4px; color: #fff; background: var(--primary); }
+.rf-two-factor-settings button.danger { background: #dc2626; }
+.rf-two-factor-secret code { overflow-wrap: anywhere; color: var(--rf-text); }
 
 @media (max-width: 560px) {
   .rf-x-edit-header { padding-inline: 10px 12px; }

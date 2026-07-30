@@ -1,7 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"os"
@@ -131,6 +134,33 @@ func (s *Server) approveImagePath(w http.ResponseWriter, r *http.Request, conten
 		return false
 	}
 
+	return s.approveImageBytes(w, r, contentType, imageBytes)
+}
+
+func moderationImageBytes(mimeType string, imageBytes []byte) ([]byte, error) {
+	if mimeType != "image/gif" {
+		return imageBytes, nil
+	}
+	frame, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return nil, err
+	}
+	var converted bytes.Buffer
+	if err := png.Encode(&converted, frame); err != nil {
+		return nil, err
+	}
+	return converted.Bytes(), nil
+}
+
+func (s *Server) approveImageBytes(w http.ResponseWriter, r *http.Request, contentType string, imageBytes []byte) bool {
+	imageModerator, ok := s.moderator.(contentmoderation.ImageService)
+	if !ok || !imageModerator.ImageEnabled() {
+		return true
+	}
+	if len(imageBytes) < 1 || len(imageBytes) > maxModeratedImageBytes {
+		writeError(w, http.StatusUnprocessableEntity, "image_moderation_size_invalid", "图片不能为空或超过 7 MB")
+		return false
+	}
 	user := currentUser(r)
 	result, reviewErr := imageModerator.ReviewImage(r.Context(), contentType, imageBytes)
 	decision := "allowed"

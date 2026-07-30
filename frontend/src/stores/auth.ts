@@ -13,7 +13,16 @@ export const useAuthStore = defineStore('auth', () => {
     if (ready.value) return
     try { user.value = await fetchMe() } catch { user.value = null } finally { ready.value = true }
   }
-  async function login(email: string, password: string, captchaToken = '') { loading.value = true; try { user.value = (await loginRequest({ email, password, captcha_token: captchaToken })).user } finally { loading.value = false } }
+  async function login(email: string, password: string, captchaToken = '') {
+    loading.value = true
+    try {
+      const result = await loginRequest({ email, password, captcha_token: captchaToken })
+      if (result.requires_2fa && result.challenge_token) return { requires2FA: true, challengeToken: result.challenge_token }
+      if (!result.user) throw new Error('login_response_invalid')
+      user.value = result.user
+      return { requires2FA: false, challengeToken: '' }
+    } finally { loading.value = false }
+  }
   async function register(email: string, password: string, displayName: string, captchaToken = '', emailCode = '') { loading.value = true; try { user.value = (await registerRequest({ email, password, display_name: displayName, captcha_token: captchaToken, ...(emailCode ? { email_code: emailCode } : {}) })).user } finally { loading.value = false } }
   async function logout() { await logoutRequest().catch(() => {}); user.value = null }
   function setUser(nextUser: User) { user.value = nextUser }

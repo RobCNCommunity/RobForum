@@ -22,6 +22,7 @@ type User struct {
 	RobloxName          string       `json:"roblox_name,omitempty"`
 	RobloxID            string       `json:"roblox_id,omitempty"`
 	RobloxVerified      bool         `json:"roblox_verified"`
+	TwoFactorEnabled    bool         `json:"two_factor_enabled"`
 	CreatedAt           time.Time    `json:"created_at"`
 }
 
@@ -236,6 +237,7 @@ type CaptchaConfig struct {
 }
 
 type OAuthConfig struct {
+	ID                   int64     `json:"id"`
 	Enabled              bool      `json:"enabled"`
 	ProviderKey          string    `json:"provider_key"`
 	ProviderName         string    `json:"provider_name"`

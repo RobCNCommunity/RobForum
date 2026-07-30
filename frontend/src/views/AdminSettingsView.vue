@@ -3,6 +3,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Notify } from '@nutui/nutui'
 import {
   errorMessage,
+  createOAuth,
+  deleteOAuth,
   deleteVerificationBadge,
   fetchAdminSite,
   fetchCaptcha,
@@ -33,7 +35,8 @@ const site = reactive<SiteSettings>({
 })
 const smtp = reactive<SMTPConfig>({ enabled: false, host: '', port: 587, username: '', password: '', has_password: false, from_email: '', from_name: '', tls_mode: 'starttls' })
 const captcha = reactive<CaptchaConfig>({ enabled: false, provider: 'gt4', site_key: '', endpoint: '', secret: '', has_secret: false, adapter_status: 'disabled' })
-const oauth = reactive<OAuthConfig>({ enabled: false, provider_key: 'oidc', provider_name: 'OAuth', client_id: '', client_secret: '', has_client_secret: false, authorization_url: '', token_url: '', userinfo_url: '', scopes: 'openid email profile', token_auth_method: 'client_secret_post', require_verified_email: true, updated_at: '' })
+const oauth = reactive<OAuthConfig>({ id: 0, enabled: false, provider_key: 'oidc', provider_name: 'OAuth', client_id: '', client_secret: '', has_client_secret: false, authorization_url: '', token_url: '', userinfo_url: '', scopes: 'openid email profile', token_auth_method: 'client_secret_post', require_verified_email: true, updated_at: '' })
+const oauthProviders = ref<OAuthConfig[]>([])
 const loading = ref(true)
 const savingSite = ref(false)
 const savingSMTP = ref(false)
@@ -53,7 +56,8 @@ onMounted(async () => {
     allowedDomainsText.value = siteData.allowed_email_domains.join(', ')
     Object.assign(smtp, smtpData, { password: '' })
     Object.assign(captcha, captchaData, { secret: '' })
-    Object.assign(oauth, oauthData, { client_secret: '', clear_client_secret: false })
+    oauthProviders.value = oauthData
+    if (oauthData[0]) Object.assign(oauth, oauthData[0], { client_secret: '', clear_client_secret: false })
   } catch (error) {
     Notify.danger(errorMessage(error, '管理配置加载失败'))
   } finally {
@@ -178,14 +182,30 @@ async function saveCaptcha() {
 async function saveOAuth() {
   savingOAuth.value = true
   try {
-    const updated = await updateOAuth({ ...oauth, client_secret: oauth.client_secret?.trim() || undefined })
+    const payload = { ...oauth, client_secret: oauth.client_secret?.trim() || undefined }
+    const updated = oauth.id ? await updateOAuth(payload) : await createOAuth(payload)
     Object.assign(oauth, updated, { client_secret: '', clear_client_secret: false })
+    const index = oauthProviders.value.findIndex((item) => item.id === updated.id)
+    if (index >= 0) oauthProviders.value[index] = updated
+    else oauthProviders.value.push(updated)
     Notify.success('OAuth 登录配置已保存')
   } catch (error) {
     Notify.danger(errorMessage(error, 'OAuth 配置保存失败'))
   } finally {
     savingOAuth.value = false
   }
+}
+
+function editOAuth(provider: OAuthConfig) { Object.assign(oauth, provider, { client_secret: '', clear_client_secret: false }) }
+function addOAuth() { Object.assign(oauth, { id: 0, enabled: false, provider_key: '', provider_name: 'OAuth', client_id: '', client_secret: '', has_client_secret: false, masked_client_secret: '', clear_client_secret: false, authorization_url: '', token_url: '', userinfo_url: '', scopes: 'openid email profile', token_auth_method: 'client_secret_post', require_verified_email: true, updated_at: '' }) }
+async function removeOAuth() {
+  if (!oauth.id || !window.confirm(`确认删除 ${oauth.provider_name}？已绑定账号记录会保留。`)) return
+  try {
+    await deleteOAuth(oauth.id)
+    oauthProviders.value = oauthProviders.value.filter((item) => item.id !== oauth.id)
+    if (oauthProviders.value[0]) editOAuth(oauthProviders.value[0]); else addOAuth()
+    Notify.success('OAuth 提供商已删除')
+  } catch (error) { Notify.danger(errorMessage(error, 'OAuth 提供商删除失败')) }
 }
 
 function adapterLabel(value: string) {
@@ -251,6 +271,10 @@ function adapterLabel(value: string) {
 
       <section class="setting-card wide-card">
         <header class="rf-panel-heading"><div><h3><AppIcon name="link" size="18" />OAuth / OIDC 登录</h3><p>接入支持 Authorization Code 的第三方身份提供商，登录使用 state 与 PKCE S256。</p></div><span class="rf-status-chip" :class="oauth.enabled ? 'is-on' : ''">{{ oauth.enabled ? '已启用' : '未启用' }}</span></header>
+        <div class="rf-oauth-provider-list">
+          <button v-for="provider in oauthProviders" :key="provider.id" type="button" :class="{ active: provider.id === oauth.id }" @click="editOAuth(provider)"><strong>{{ provider.provider_name }}</strong><span>{{ provider.enabled ? '已启用' : '已关闭' }}</span></button>
+          <button type="button" class="add" @click="addOAuth"><AppIcon name="add" size="16" />添加提供商</button>
+        </div>
         <form class="rf-editor-form" @submit.prevent="saveOAuth">
           <label class="rf-switch-row"><input v-model="oauth.enabled" type="checkbox" /><span class="rf-toggle" aria-hidden="true" /><span>启用 OAuth 登录</span></label>
           <div class="rf-form-grid rf-form-grid--two"><label class="rf-field-label"><span>提供商标识</span><input v-model="oauth.provider_key" class="rf-control" maxlength="64" placeholder="例如 github 或 oidc" /><small>保存后请保持不变，用于识别已绑定账号。</small></label><label class="rf-field-label"><span>登录按钮名称</span><input v-model="oauth.provider_name" class="rf-control" maxlength="80" placeholder="例如 GitHub" /></label></div>
@@ -263,7 +287,7 @@ function adapterLabel(value: string) {
           <div class="rf-form-grid rf-form-grid--two"><label class="rf-field-label"><span>Scopes</span><input v-model="oauth.scopes" class="rf-control" placeholder="openid email profile" /></label><label class="rf-field-label"><span>Token 鉴权方式</span><select v-model="oauth.token_auth_method" class="rf-control"><option value="client_secret_post">client_secret_post</option><option value="client_secret_basic">client_secret_basic</option></select></label></div>
           <label class="rf-switch-row"><input v-model="oauth.require_verified_email" type="checkbox" /><span class="rf-toggle" aria-hidden="true" /><span>只接受提供商明确验证过的邮箱</span></label>
           <div class="rf-inline-note rf-inline-note--info"><AppIcon name="notice" size="16" />回调地址：{{ (site.public_url || 'https://你的域名').replace(/\/$/, '') }}/api/v1/oauth/callback</div>
-          <div class="rf-form-actions"><nut-button type="primary" :loading="savingOAuth" @click="saveOAuth">保存 OAuth 设置</nut-button></div>
+          <div class="rf-form-actions"><nut-button type="primary" :loading="savingOAuth" @click="saveOAuth">{{ oauth.id ? '保存提供商' : '添加提供商' }}</nut-button><nut-button v-if="oauth.id" type="danger" plain @click="removeOAuth">删除</nut-button></div>
         </form>
       </section>
 
@@ -271,3 +295,11 @@ function adapterLabel(value: string) {
     </div>
   </PageContainer>
 </template>
+
+<style scoped>
+.rf-oauth-provider-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 16px; border-bottom: 1px solid var(--rf-line); }
+.rf-oauth-provider-list button { display: inline-flex; min-height: 40px; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--rf-line); border-radius: 5px; color: var(--rf-text); background: var(--rf-bg); }
+.rf-oauth-provider-list button span { color: var(--rf-muted); font-size: 12px; }
+.rf-oauth-provider-list button.active { border-color: var(--primary); }
+.rf-oauth-provider-list button.add { color: var(--primary); }
+</style>

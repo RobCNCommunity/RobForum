@@ -20,35 +20,53 @@ var ErrOAuthRegistrationDisabled = errors.New("OAuth registration is disabled")
 
 type OAuthLoginState struct {
 	CodeVerifier string
+	ProviderKey  string
 	ReturnTo     string
 }
 
-func (s *Store) GetOAuthConfig() (domain.OAuthConfig, error) {
-	return s.oauthConfig(false)
+func (s *Store) ListOAuthConfigs(enabledOnly bool) ([]domain.OAuthConfig, error) {
+	query := `SELECT id, enabled, provider_key, provider_name, client_id, client_secret_ciphertext, authorization_url, token_url, userinfo_url, scopes, token_auth_method, require_verified_email, updated_at FROM oauth_settings`
+	if enabledOnly {
+		query += ` WHERE enabled = 1`
+	}
+	query += ` ORDER BY id`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	configs := make([]domain.OAuthConfig, 0)
+	for rows.Next() {
+		config, err := scanOAuthConfig(rows, false, s.masterKey)
+		if err != nil {
+			return nil, err
+		}
+		configs = append(configs, config)
+	}
+	return configs, rows.Err()
 }
 
-func (s *Store) OAuthDeliveryConfig() (domain.OAuthConfig, error) {
-	return s.oauthConfig(true)
+func (s *Store) OAuthDeliveryConfig(providerKey string) (domain.OAuthConfig, error) {
+	if strings.TrimSpace(providerKey) == "" {
+		var key string
+		if err := s.db.QueryRow(`SELECT provider_key FROM oauth_settings WHERE enabled = 1 ORDER BY id LIMIT 1`).Scan(&key); err != nil {
+			return domain.OAuthConfig{}, err
+		}
+		providerKey = key
+	}
+	return oauthConfigWithQuery(s.db, 0, providerKey, true, false, s.masterKey)
 }
 
-func (s *Store) oauthConfig(includeSecret bool) (domain.OAuthConfig, error) {
-	return oauthConfigWithQuery(s.db, includeSecret, false, s.masterKey)
-}
+type oauthScanner interface{ Scan(...any) error }
 
-func oauthConfigWithQuery(queryer rowQueryer, includeSecret, forUpdate bool, masterKey string) (domain.OAuthConfig, error) {
+func scanOAuthConfig(scanner oauthScanner, includeSecret bool, masterKey string) (domain.OAuthConfig, error) {
 	var config domain.OAuthConfig
 	var enabled, requireVerified int
 	var cipherText string
-	query := `SELECT enabled, provider_key, provider_name, client_id, client_secret_ciphertext, authorization_url, token_url, userinfo_url, scopes, token_auth_method, require_verified_email, updated_at FROM oauth_settings WHERE id = 1`
-	if forUpdate {
-		query += ` FOR UPDATE`
-	}
-	if err := queryer.QueryRow(query).Scan(&enabled, &config.ProviderKey, &config.ProviderName, &config.ClientID, &cipherText, &config.AuthorizationURL, &config.TokenURL, &config.UserInfoURL, &config.Scopes, &config.TokenAuthMethod, &requireVerified, &config.UpdatedAt); err != nil {
+	if err := scanner.Scan(&config.ID, &enabled, &config.ProviderKey, &config.ProviderName, &config.ClientID, &cipherText, &config.AuthorizationURL, &config.TokenURL, &config.UserInfoURL, &config.Scopes, &config.TokenAuthMethod, &requireVerified, &config.UpdatedAt); err != nil {
 		return config, err
 	}
-	config.Enabled = enabled != 0
-	config.RequireVerifiedEmail = requireVerified != 0
-	config.HasClientSecret = cipherText != ""
+	config.Enabled, config.RequireVerifiedEmail, config.HasClientSecret = enabled != 0, requireVerified != 0, cipherText != ""
 	if cipherText != "" {
 		secret, err := auth.Decrypt(masterKey, cipherText)
 		if err != nil {
@@ -62,13 +80,29 @@ func oauthConfigWithQuery(queryer rowQueryer, includeSecret, forUpdate bool, mas
 	return config, nil
 }
 
+func oauthConfigWithQuery(queryer rowQueryer, id int64, providerKey string, includeSecret, forUpdate bool, masterKey string) (domain.OAuthConfig, error) {
+	query := `SELECT id, enabled, provider_key, provider_name, client_id, client_secret_ciphertext, authorization_url, token_url, userinfo_url, scopes, token_auth_method, require_verified_email, updated_at FROM oauth_settings WHERE `
+	var arg any
+	if id > 0 {
+		query += `id = ?`
+		arg = id
+	} else {
+		query += `provider_key = ?`
+		arg = strings.ToLower(strings.TrimSpace(providerKey))
+	}
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	return scanOAuthConfig(queryer.QueryRow(query, arg), includeSecret, masterKey)
+}
+
 func (s *Store) UpdateOAuthConfig(actorID int64, input domain.OAuthConfig) (domain.OAuthConfig, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return domain.OAuthConfig{}, err
 	}
 	defer tx.Rollback()
-	current, err := oauthConfigWithQuery(tx, true, true, s.masterKey)
+	current, err := oauthConfigWithQuery(tx, input.ID, "", true, true, s.masterKey)
 	if err != nil {
 		return domain.OAuthConfig{}, err
 	}
@@ -126,7 +160,7 @@ func (s *Store) UpdateOAuthConfig(actorID int64, input domain.OAuthConfig) (doma
 	}
 
 	now := time.Now().UTC()
-	result, err := tx.Exec(`UPDATE oauth_settings SET enabled = ?, provider_key = ?, provider_name = ?, client_id = ?, client_secret_ciphertext = ?, authorization_url = ?, token_url = ?, userinfo_url = ?, scopes = ?, token_auth_method = ?, require_verified_email = ?, updated_at = ? WHERE id = 1`, boolInt(input.Enabled), input.ProviderKey, input.ProviderName, input.ClientID, cipherText, input.AuthorizationURL, input.TokenURL, input.UserInfoURL, input.Scopes, input.TokenAuthMethod, boolInt(input.RequireVerifiedEmail), now)
+	result, err := tx.Exec(`UPDATE oauth_settings SET enabled = ?, provider_key = ?, provider_name = ?, client_id = ?, client_secret_ciphertext = ?, authorization_url = ?, token_url = ?, userinfo_url = ?, scopes = ?, token_auth_method = ?, require_verified_email = ?, updated_at = ? WHERE id = ?`, boolInt(input.Enabled), input.ProviderKey, input.ProviderName, input.ClientID, cipherText, input.AuthorizationURL, input.TokenURL, input.UserInfoURL, input.Scopes, input.TokenAuthMethod, boolInt(input.RequireVerifiedEmail), now, input.ID)
 	if err != nil {
 		return domain.OAuthConfig{}, err
 	}
@@ -136,10 +170,10 @@ func (s *Store) UpdateOAuthConfig(actorID int64, input domain.OAuthConfig) (doma
 		}
 		return domain.OAuthConfig{}, errors.New("OAuth settings row is missing")
 	}
-	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'oauth_settings', 1, 'update', '', ?)`, actorID, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'oauth_settings', ?, 'update', '', ?)`, actorID, input.ID, now); err != nil {
 		return domain.OAuthConfig{}, err
 	}
-	config, err := oauthConfigWithQuery(tx, false, false, s.masterKey)
+	config, err := oauthConfigWithQuery(tx, input.ID, "", false, false, s.masterKey)
 	if err != nil {
 		return domain.OAuthConfig{}, err
 	}
@@ -147,6 +181,49 @@ func (s *Store) UpdateOAuthConfig(actorID int64, input domain.OAuthConfig) (doma
 		return domain.OAuthConfig{}, err
 	}
 	return config, nil
+}
+
+func (s *Store) CreateOAuthConfig(actorID int64, input domain.OAuthConfig) (domain.OAuthConfig, error) {
+	input.ID = 0
+	input.ProviderKey = strings.ToLower(strings.TrimSpace(input.ProviderKey))
+	if !validOAuthProviderKey(input.ProviderKey) {
+		return domain.OAuthConfig{}, errors.New("OAuth provider identity is invalid")
+	}
+	now := time.Now().UTC()
+	result, err := s.db.Exec(`INSERT INTO oauth_settings (enabled, provider_key, provider_name, client_id, client_secret_ciphertext, authorization_url, token_url, userinfo_url, scopes, token_auth_method, require_verified_email, updated_at) VALUES (0, ?, 'OAuth', '', '', '', '', '', 'openid email profile', 'client_secret_post', 1, ?)`, input.ProviderKey, now)
+	if err != nil {
+		return domain.OAuthConfig{}, err
+	}
+	input.ID, err = result.LastInsertId()
+	if err != nil {
+		return domain.OAuthConfig{}, err
+	}
+	config, updateErr := s.UpdateOAuthConfig(actorID, input)
+	if updateErr != nil {
+		_, _ = s.db.Exec(`DELETE FROM oauth_settings WHERE id = ?`, input.ID)
+		return domain.OAuthConfig{}, updateErr
+	}
+	return config, nil
+}
+
+func (s *Store) DeleteOAuthConfig(actorID, id int64) error {
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	config, err := oauthConfigWithQuery(tx, id, "", false, true, s.masterKey)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM oauth_settings WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'oauth_settings', ?, 'delete', ?, ?)`, actorID, id, config.ProviderKey, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func validOAuthProviderKey(value string) bool {
@@ -161,10 +238,10 @@ func validOAuthProviderKey(value string) bool {
 	return true
 }
 
-func (s *Store) CreateOAuthLoginState(stateHash [32]byte, codeVerifier, returnTo string, expiresAt time.Time) error {
+func (s *Store) CreateOAuthLoginState(stateHash [32]byte, codeVerifier, providerKey, returnTo string, expiresAt time.Time) error {
 	codeVerifier = strings.TrimSpace(codeVerifier)
 	returnTo = strings.TrimSpace(returnTo)
-	if len(codeVerifier) < 43 || len(codeVerifier) > 128 || !validInternalReturnTo(returnTo) || !expiresAt.After(time.Now().UTC()) {
+	if len(codeVerifier) < 43 || len(codeVerifier) > 128 || !validOAuthProviderKey(providerKey) || !validInternalReturnTo(returnTo) || !expiresAt.After(time.Now().UTC()) {
 		return errors.New("OAuth login state is invalid")
 	}
 	now := time.Now().UTC()
@@ -176,7 +253,7 @@ func (s *Store) CreateOAuthLoginState(stateHash [32]byte, codeVerifier, returnTo
 	if _, err := tx.Exec(`DELETE FROM oauth_login_states WHERE expires_at <= ?`, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO oauth_login_states (state_hash, code_verifier, return_to, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`, stateHash[:], codeVerifier, returnTo, expiresAt, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO oauth_login_states (state_hash, code_verifier, provider_key, return_to, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`, stateHash[:], codeVerifier, providerKey, returnTo, expiresAt, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -196,7 +273,7 @@ func (s *Store) ConsumeOAuthLoginState(state string) (OAuthLoginState, error) {
 	defer tx.Rollback()
 	var result OAuthLoginState
 	var expiresAt time.Time
-	if err := tx.QueryRow(`SELECT code_verifier, return_to, expires_at FROM oauth_login_states WHERE state_hash = ? FOR UPDATE`, hash[:]).Scan(&result.CodeVerifier, &result.ReturnTo, &expiresAt); err != nil {
+	if err := tx.QueryRow(`SELECT code_verifier, provider_key, return_to, expires_at FROM oauth_login_states WHERE state_hash = ? FOR UPDATE`, hash[:]).Scan(&result.CodeVerifier, &result.ProviderKey, &result.ReturnTo, &expiresAt); err != nil {
 		return OAuthLoginState{}, errors.New("OAuth login state is invalid or expired")
 	}
 	if _, err := tx.Exec(`DELETE FROM oauth_login_states WHERE state_hash = ?`, hash[:]); err != nil {

@@ -114,6 +114,11 @@ func (s *Store) migrate() error {
 	if err := s.ensureColumnAbsent("posts", "post_type"); err != nil {
 		return fmt.Errorf("migration column posts.post_type removal failed: %w", err)
 	}
+	// oauth_settings used to be a single TINYINT row. Expanding the key in
+	// place preserves that provider while allowing independently managed rows.
+	if _, err := s.db.Exec(`ALTER TABLE oauth_settings MODIFY id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT`); err != nil {
+		return fmt.Errorf("migration oauth settings identity failed: %w", err)
+	}
 	// Backfill the immutable purchase ledger before any request can rely on it.
 	// Historical duplicate paid orders intentionally map to the earliest order only.
 	if _, err := s.db.Exec(`INSERT IGNORE INTO resource_purchases (user_id, resource_id, order_id, purchased_at)
@@ -178,6 +183,7 @@ func (s *Store) migrate() error {
 		{table: "comments", name: "parent_id", def: "BIGINT NULL"},
 		{table: "notices", name: "link_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "avatar_frames", name: "image_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
+		{table: "oauth_login_states", name: "provider_key", def: "VARCHAR(64) NOT NULL DEFAULT 'oidc'"},
 	} {
 		if err := s.ensureColumn(column.table, column.name, column.def); err != nil {
 			return fmt.Errorf("migration column %s.%s failed: %w", column.table, column.name, err)
@@ -206,6 +212,7 @@ func (s *Store) migrate() error {
 		{table: "users", name: "idx_users_membership_expires", def: "INDEX idx_users_membership_expires (membership_expires_at, status)"},
 		{table: "users", name: "idx_users_membership_tier", def: "INDEX idx_users_membership_tier (membership_tier_id, membership_expires_at)"},
 		{table: "membership_tiers", name: "idx_membership_tiers_enabled_sort", def: "INDEX idx_membership_tiers_enabled_sort (enabled, sort_order, id)"},
+		{table: "oauth_settings", name: "uq_oauth_settings_provider_key", def: "UNIQUE INDEX uq_oauth_settings_provider_key (provider_key)"},
 	} {
 		if err := s.ensureIndex(index.table, index.name, index.def); err != nil {
 			return fmt.Errorf("migration index %s.%s failed: %w", index.table, index.name, err)
@@ -906,6 +913,14 @@ func getUser(queryer rowQueryer, id int64) (domain.User, error) {
 	applyUserMembership(&user, membershipTierID, membershipStartedAt, membershipExpiresAt)
 	if err == nil {
 		user.AvatarFrame, err = attachAvatarFrameToUser(queryer, user.ID)
+	}
+	if err == nil {
+		var enabled int
+		twoFactorErr := queryer.QueryRow(`SELECT enabled FROM user_two_factor_settings WHERE user_id = ?`, user.ID).Scan(&enabled)
+		if twoFactorErr != nil && !errors.Is(twoFactorErr, sql.ErrNoRows) {
+			return user, twoFactorErr
+		}
+		user.TwoFactorEnabled = enabled != 0
 	}
 	return user, err
 }

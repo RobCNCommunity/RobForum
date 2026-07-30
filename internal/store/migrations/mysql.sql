@@ -738,7 +738,7 @@ CREATE TABLE IF NOT EXISTS redeem_codes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS oauth_settings (
-  id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
   provider_key VARCHAR(64) NOT NULL DEFAULT 'oidc',
   provider_name VARCHAR(80) NOT NULL DEFAULT 'OAuth',
@@ -750,7 +750,27 @@ CREATE TABLE IF NOT EXISTS oauth_settings (
   scopes VARCHAR(500) NOT NULL DEFAULT 'openid email profile',
   token_auth_method VARCHAR(32) NOT NULL DEFAULT 'client_secret_post',
   require_verified_email TINYINT(1) NOT NULL DEFAULT 1,
-  updated_at DATETIME(6) NOT NULL
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_oauth_settings_provider_key (provider_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_two_factor_settings (
+  user_id BIGINT NOT NULL PRIMARY KEY,
+  secret_ciphertext TEXT NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  confirmed_at DATETIME(6) NULL,
+  updated_at DATETIME(6) NOT NULL,
+  CONSTRAINT fk_user_two_factor_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS two_factor_login_challenges (
+  token_hash VARBINARY(32) NOT NULL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  expires_at DATETIME(6) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_two_factor_challenges_expires (expires_at),
+  CONSTRAINT fk_two_factor_challenge_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS oauth_accounts (
@@ -768,6 +788,7 @@ CREATE TABLE IF NOT EXISTS oauth_accounts (
 CREATE TABLE IF NOT EXISTS oauth_login_states (
   state_hash VARBINARY(32) NOT NULL PRIMARY KEY,
   code_verifier VARCHAR(128) NOT NULL,
+  provider_key VARCHAR(64) NOT NULL DEFAULT 'oidc',
   return_to VARCHAR(255) NOT NULL DEFAULT '/',
   expires_at DATETIME(6) NOT NULL,
   created_at DATETIME(6) NOT NULL,

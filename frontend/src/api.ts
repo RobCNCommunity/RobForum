@@ -130,6 +130,7 @@ export interface User {
   roblox_name?: string
   roblox_id?: string
   roblox_verified: boolean
+  two_factor_enabled: boolean
   created_at: string
 }
 
@@ -168,8 +169,9 @@ export interface CreatorPayout { id: number; creator_id: number; creator_name?: 
 export interface SMTPConfig { enabled: boolean; host: string; port: number; username: string; password?: string; has_password: boolean; masked_password?: string; from_email: string; from_name: string; tls_mode: string }
 export interface CaptchaConfig { enabled: boolean; provider: 'gt4' | 'gt3' | 'aliyun'; site_key: string; endpoint: string; has_secret: boolean; masked_secret?: string; secret?: string; adapter_status: string }
 export interface CaptchaUpdate { enabled: boolean; provider: 'gt4' | 'gt3' | 'aliyun'; site_key: string; endpoint: string; masked_secret?: string }
-export interface PublicOAuthConfig { enabled: boolean; provider_name: string }
+export interface PublicOAuthConfig { id: number; enabled: boolean; provider_key: string; provider_name: string }
 export interface OAuthConfig {
+  id: number
   enabled: boolean
   provider_key: string
   provider_name: string
@@ -258,7 +260,7 @@ export async function createAdminAvatarFrame(input: Omit<AvatarFrame, 'id' | 'sa
 export async function updateAdminAvatarFrame(id: number, input: Omit<AvatarFrame, 'id' | 'sales_count' | 'owned' | 'equipped' | 'can_use' | 'purchased_at' | 'created_at' | 'updated_at'>) { return data<AvatarFrame>(await api.put(`/admin/avatar-frames/${id}`, input)) }
 export async function deleteAdminAvatarFrame(id: number) { return data<{ disabled: boolean }>(await api.delete(`/admin/avatar-frames/${id}`)) }
 export async function fetchPublicCaptcha() { return data<CaptchaConfig>(await api.get('/captcha/config')) }
-export async function fetchPublicOAuth() { return data<PublicOAuthConfig>(await api.get('/oauth/config')) }
+export async function fetchPublicOAuth() { return data<PublicOAuthConfig[]>(await api.get('/oauth/config')) }
 export async function fetchBoards() { return data<Board[]>(await api.get('/boards')) }
 export async function fetchPosts(params?: { board?: string; q?: string }) { return data<Post[]>(await api.get('/posts', { params })) }
 export async function fetchPostsPage(params?: { board?: string; q?: string; offset?: number; limit?: number }) {
@@ -312,7 +314,12 @@ export async function fetchAdminPayouts(status = 'pending') { return data<Creato
 export async function reviewCreatorPayout(id: number, status: 'paid' | 'rejected', note = '') { return data<CreatorPayout>(await api.patch(`/admin/payouts/${id}`, { status, note })) }
 export async function register(input: { email: string; password: string; display_name: string; captcha_token?: string; email_code?: string }) { return data<{ user: User }>(await api.post('/auth/register', input)) }
 export async function sendRegistrationVerification(email: string, captcha_token = '') { return data<{ sent: boolean; expires_in: number }>(await api.post('/auth/register/verification', { email, captcha_token })) }
-export async function login(input: { email: string; password: string; captcha_token?: string }) { return data<{ user: User }>(await api.post('/auth/login', input)) }
+export async function login(input: { email: string; password: string; captcha_token?: string }) { return data<{ user?: User; requires_2fa?: boolean; challenge_token?: string }>(await api.post('/auth/login', input)) }
+export async function verifyTwoFactorLogin(challenge_token: string, code: string) { return data<{ user: User }>(await api.post('/auth/login/2fa', { challenge_token, code })) }
+export async function fetchTwoFactorStatus() { return data<{ enabled: boolean }>(await api.get('/me/2fa')) }
+export async function setupTwoFactor() { return data<{ secret: string; otpauth_uri: string; qr_data_url: string }>(await api.post('/me/2fa/setup')) }
+export async function confirmTwoFactor(code: string) { return data<{ enabled: boolean }>(await api.post('/me/2fa/confirm', { code })) }
+export async function disableTwoFactor(code: string) { return data<{ enabled: boolean }>(await api.delete('/me/2fa', { data: { code } })) }
 export async function logout() { return data<{ logged_out: boolean }>(await api.post('/auth/logout')) }
 export async function fetchMe() { return data<User>(await api.get('/me')) }
 export async function updateMyProfile(input: { display_name: string; bio: string }) { return data<User>(await api.patch('/me/profile', input)) }
@@ -387,8 +394,10 @@ export async function updateSMTP(input: SMTPConfig) { return data<SMTPConfig>(aw
 export async function testSMTP(email: string) { return data<{ sent: boolean }>(await api.post('/admin/smtp/test', { email })) }
 export async function fetchCaptcha() { return data<CaptchaConfig>(await api.get('/admin/captcha')) }
 export async function updateCaptcha(input: CaptchaUpdate) { return data<CaptchaConfig>(await api.put('/admin/captcha', input)) }
-export async function fetchOAuth() { return data<OAuthConfig>(await api.get('/admin/oauth')) }
-export async function updateOAuth(input: OAuthConfig) { return data<OAuthConfig>(await api.put('/admin/oauth', input)) }
+export async function fetchOAuth() { return data<OAuthConfig[]>(await api.get('/admin/oauth')) }
+export async function createOAuth(input: OAuthConfig) { return data<OAuthConfig>(await api.post('/admin/oauth', input)) }
+export async function updateOAuth(input: OAuthConfig) { return data<OAuthConfig>(await api.put(`/admin/oauth/${input.id}`, input)) }
+export async function deleteOAuth(id: number) { return data<{ deleted: boolean }>(await api.delete(`/admin/oauth/${id}`)) }
 export function resourceDownloadURL(id: number) { return `/api/v1/resources/${id}/download` }
 export function adminResourceDownloadURL(id: number) { return `/api/v1/admin/resources/${id}/download` }
 

@@ -24,7 +24,7 @@ const passwordError = ref('')
 const showPassword = ref(false)
 const submitting = ref(false)
 const form = reactive({ email: '', password: '' })
-const oauth = ref<PublicOAuthConfig>({ enabled: false, provider_name: 'OAuth' })
+const oauthProviders = ref<PublicOAuthConfig[]>([])
 const isMobile = ref(typeof window !== 'undefined' && window.innerWidth <= 560)
 
 const siteName = computed(() => site.settings?.site_name || '罗布玩家社区')
@@ -95,7 +95,13 @@ async function submit() {
   submitting.value = true
   try {
     const captchaToken = await verification.value?.verify() || ''
-    await auth.login(form.email, form.password, captchaToken)
+    const result = await auth.login(form.email, form.password, captchaToken)
+    if (result?.requires2FA) {
+      sessionStorage.setItem('robforum:2fa-challenge', result.challengeToken)
+      sessionStorage.setItem('robforum:2fa-return-to', safeDestination())
+      await router.push('/login/2fa')
+      return
+    }
     Notify.success('登录成功')
     await router.push(safeDestination())
   } catch (cause) {
@@ -120,14 +126,14 @@ function updateViewport() {
   isMobile.value = window.innerWidth <= 560
 }
 
-function oauthLogin() {
-  window.location.assign(`/api/v1/oauth/start?return_to=${encodeURIComponent(safeDestination())}`)
+function oauthLogin(providerKey: string) {
+  window.location.assign(`/api/v1/oauth/start?provider=${encodeURIComponent(providerKey)}&return_to=${encodeURIComponent(safeDestination())}`)
 }
 
 onMounted(async () => {
   updateViewport()
   window.addEventListener('resize', updateViewport)
-  try { oauth.value = await fetchPublicOAuth() } catch { oauth.value.enabled = false }
+  try { oauthProviders.value = await fetchPublicOAuth() } catch { oauthProviders.value = [] }
   const failure = typeof route.query.oauth_error === 'string' ? route.query.oauth_error : ''
   if (failure) {
     const messages: Record<string, string> = {
@@ -189,11 +195,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewport))
           <p v-if="emailError" id="login-email-error" class="rf-auth-field-error" role="alert">{{ emailError }}</p>
           <button type="button" class="rf-auth-action rf-auth-action--primary" @click="continueWithEmail">继续</button>
 
-          <template v-if="oauth.enabled">
+          <template v-if="oauthProviders.length">
             <nut-divider content-position="center">或使用其他方式</nut-divider>
-            <button type="button" class="rf-auth-action rf-auth-action--secondary" @click="oauthLogin">
+            <button v-for="provider in oauthProviders" :key="provider.id" type="button" class="rf-auth-action rf-auth-action--secondary" @click="oauthLogin(provider.provider_key)">
               <AppIcon name="link" size="19" />
-              使用 {{ oauth.provider_name }} 继续
+              使用 {{ provider.provider_name }} 继续
             </button>
           </template>
         </template>

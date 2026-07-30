@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"roblox-community/internal/domain"
 	"roblox-community/internal/store"
 )
@@ -30,19 +31,20 @@ type oauthIdentity struct {
 }
 
 func (s *Server) publicOAuthConfig(w http.ResponseWriter, _ *http.Request) {
-	config, err := s.store.GetOAuthConfig()
+	configs, err := s.store.ListOAuthConfigs(true)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "oauth_config_unavailable", "OAuth 登录配置暂不可用")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":       config.Enabled,
-		"provider_name": config.ProviderName,
-	})
+	publicConfigs := make([]map[string]any, 0, len(configs))
+	for _, config := range configs {
+		publicConfigs = append(publicConfigs, map[string]any{"id": config.ID, "enabled": true, "provider_key": config.ProviderKey, "provider_name": config.ProviderName})
+	}
+	writeJSON(w, http.StatusOK, publicConfigs)
 }
 
 func (s *Server) adminOAuthConfig(w http.ResponseWriter, _ *http.Request) {
-	config, err := s.store.GetOAuthConfig()
+	config, err := s.store.ListOAuthConfigs(false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "oauth_config_failed", "OAuth 配置读取失败")
 		return
@@ -50,11 +52,25 @@ func (s *Server) adminOAuthConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, config)
 }
 
+func (s *Server) createOAuthConfig(w http.ResponseWriter, r *http.Request) {
+	var input domain.OAuthConfig
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	config, err := s.store.CreateOAuthConfig(currentUser(r).ID, input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "oauth_config_invalid", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, config)
+}
+
 func (s *Server) updateOAuthConfig(w http.ResponseWriter, r *http.Request) {
 	var input domain.OAuthConfig
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	input.ID, _ = strconv.ParseInt(chi.URLParam(r, "providerID"), 10, 64)
 	config, err := s.store.UpdateOAuthConfig(currentUser(r).ID, input)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "oauth_config_invalid", err.Error())
@@ -63,8 +79,18 @@ func (s *Server) updateOAuthConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, config)
 }
 
+func (s *Server) deleteOAuthConfig(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "providerID"), 10, 64)
+	if id < 1 || s.store.DeleteOAuthConfig(currentUser(r).ID, id) != nil {
+		writeError(w, http.StatusBadRequest, "oauth_delete_failed", "OAuth 提供商删除失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
 func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
-	config, err := s.store.OAuthDeliveryConfig()
+	providerKey := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
+	config, err := s.store.OAuthDeliveryConfig(providerKey)
 	if err != nil || !config.Enabled {
 		s.redirectOAuthFailure(w, r, "unavailable")
 		return
@@ -81,7 +107,7 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	returnTo := safeOAuthReturnTo(r.URL.Query().Get("return_to"))
 	stateHash := sha256.Sum256([]byte(state))
-	if err := s.store.CreateOAuthLoginState(stateHash, verifier, returnTo, time.Now().UTC().Add(10*time.Minute)); err != nil {
+	if err := s.store.CreateOAuthLoginState(stateHash, verifier, config.ProviderKey, returnTo, time.Now().UTC().Add(10*time.Minute)); err != nil {
 		s.logger.Error("create OAuth state failed", "error", err)
 		s.redirectOAuthFailure(w, r, "state")
 		return
@@ -135,7 +161,7 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		s.redirectOAuthFailure(w, r, "code")
 		return
 	}
-	config, err := s.store.OAuthDeliveryConfig()
+	config, err := s.store.OAuthDeliveryConfig(loginState.ProviderKey)
 	if err != nil || !config.Enabled {
 		s.redirectOAuthFailure(w, r, "configuration")
 		return
