@@ -807,3 +807,141 @@ CREATE TABLE IF NOT EXISTS content_moderation_audits (
   INDEX idx_content_moderation_actor_created (actor_id, created_at),
   INDEX idx_content_moderation_type_created (content_type, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS point_accounts (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  balance BIGINT NOT NULL DEFAULT 0,
+  total_earned BIGINT NOT NULL DEFAULT 0,
+  total_spent BIGINT NOT NULL DEFAULT 0,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_point_accounts_user (user_id),
+  CONSTRAINT fk_point_accounts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS point_ledgers (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  amount BIGINT NOT NULL,
+  entry_type VARCHAR(32) NOT NULL,
+  source_id BIGINT NOT NULL DEFAULT 0,
+  balance_after BIGINT NOT NULL,
+  note VARCHAR(255) NOT NULL DEFAULT '',
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_point_ledgers_user_created (user_id, created_at, id),
+  INDEX idx_point_ledgers_type_source (entry_type, source_id),
+  CONSTRAINT fk_point_ledgers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS point_products (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  image_url VARCHAR(500) NOT NULL DEFAULT '',
+  points_required BIGINT NOT NULL,
+  shipping_points BIGINT NOT NULL DEFAULT 0,
+  stock BIGINT NOT NULL,
+  physical TINYINT(1) NOT NULL DEFAULT 0,
+  description TEXT NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'draft',
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_point_products_status_sort (status, sort_order, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS point_orders (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_no VARCHAR(40) NOT NULL,
+  user_id BIGINT NOT NULL,
+  product_id BIGINT NOT NULL,
+  product_name VARCHAR(120) NOT NULL,
+  product_image VARCHAR(500) NOT NULL DEFAULT '',
+  points_spent BIGINT NOT NULL,
+  shipping_points BIGINT NOT NULL DEFAULT 0,
+  physical TINYINT(1) NOT NULL DEFAULT 0,
+  recipient_name VARCHAR(80) NOT NULL DEFAULT '',
+  recipient_phone VARCHAR(32) NOT NULL DEFAULT '',
+  address_json JSON NULL,
+  carrier VARCHAR(80) NOT NULL DEFAULT '',
+  tracking_no VARCHAR(120) NOT NULL DEFAULT '',
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  note VARCHAR(500) NOT NULL DEFAULT '',
+  ordered_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_point_orders_no (order_no),
+  INDEX idx_point_orders_user_created (user_id, ordered_at, id),
+  INDEX idx_point_orders_status_created (status, ordered_at, id),
+  CONSTRAINT fk_point_orders_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_point_orders_product FOREIGN KEY (product_id) REFERENCES point_products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS lottery_activities (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  cover_url VARCHAR(500) NOT NULL DEFAULT '',
+  description TEXT NOT NULL,
+  style VARCHAR(16) NOT NULL DEFAULT 'wheel',
+  cost_points BIGINT NOT NULL DEFAULT 0,
+  daily_limit INT NOT NULL DEFAULT 0,
+  total_limit INT NOT NULL DEFAULT 0,
+  daily_free_attempts INT NOT NULL DEFAULT 0,
+  starts_at DATETIME(6) NOT NULL,
+  ends_at DATETIME(6) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'draft',
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_lottery_activities_status_time (status, starts_at, ends_at, sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS lottery_prizes (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  activity_id BIGINT NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  image_url VARCHAR(500) NOT NULL DEFAULT '',
+  probability_bp INT NOT NULL,
+  stock BIGINT NOT NULL,
+  prize_type VARCHAR(16) NOT NULL,
+  bound_id BIGINT NOT NULL DEFAULT 0,
+  config_json JSON NOT NULL,
+  physical TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_lottery_prizes_activity_sort (activity_id, sort_order, id),
+  CONSTRAINT fk_lottery_prizes_activity FOREIGN KEY (activity_id) REFERENCES lottery_activities(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS lottery_draws (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  activity_id BIGINT NOT NULL,
+  prize_id BIGINT NULL,
+  points_charged BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_lottery_draws_user_activity_created (user_id, activity_id, created_at, id),
+  CONSTRAINT fk_lottery_draws_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_lottery_draws_activity FOREIGN KEY (activity_id) REFERENCES lottery_activities(id) ON DELETE CASCADE,
+  CONSTRAINT fk_lottery_draws_prize FOREIGN KEY (prize_id) REFERENCES lottery_prizes(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS lottery_wins (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  activity_id BIGINT NOT NULL,
+  prize_id BIGINT NOT NULL,
+  prize_name VARCHAR(120) NOT NULL,
+  prize_type VARCHAR(16) NOT NULL,
+  physical TINYINT(1) NOT NULL DEFAULT 0,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  order_id BIGINT NULL,
+  address_json JSON NULL,
+  delivered_at DATETIME(6) NULL,
+  won_at DATETIME(6) NOT NULL,
+  INDEX idx_lottery_wins_user_created (user_id, won_at, id),
+  INDEX idx_lottery_wins_status_created (status, won_at, id),
+  CONSTRAINT fk_lottery_wins_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_lottery_wins_activity FOREIGN KEY (activity_id) REFERENCES lottery_activities(id),
+  CONSTRAINT fk_lottery_wins_prize FOREIGN KEY (prize_id) REFERENCES lottery_prizes(id),
+  CONSTRAINT fk_lottery_wins_order FOREIGN KEY (order_id) REFERENCES point_orders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -22,6 +22,9 @@ const router = createRouter({
     { path: '/avatar-frames', component: () => import('./views/AvatarFrameMarketView.vue'), meta: { requiresAuth: true, title: '头像框市场' } },
     { path: '/membership', component: () => import('./views/MembershipView.vue'), meta: { requiresAuth: true, title: '会员中心' } },
     { path: '/check-in', component: () => import('./views/CheckInView.vue'), meta: { requiresAuth: true, title: '签到与资历' } },
+    { path: '/points', component: () => import('./views/PointsView.vue'), meta: { requiresAuth: true, title: '积分中心' } },
+    { path: '/points/store', component: () => import('./views/PointsStoreView.vue'), meta: { requiresAuth: true, title: '积分商城' } },
+    { path: '/lottery', component: () => import('./views/LotteryView.vue'), meta: { requiresAuth: true, title: '抽奖活动' } },
     { path: '/settings/profile', component: () => import('./views/ProfileSettingsView.vue'), meta: { requiresAuth: true, title: '资料设置' } },
     { path: '/verification/apply', component: () => import('./views/VerificationApplyView.vue'), meta: { requiresAuth: true, title: '蓝微认证' } },
     { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },
@@ -39,6 +42,7 @@ const router = createRouter({
     { path: '/admin/users', component: () => import('./views/AdminUsersView.vue'), meta: { admin: true, title: '用户管理' } },
     { path: '/admin/posts', component: () => import('./views/AdminPostsView.vue'), meta: { admin: true, title: '内容审核' } },
     { path: '/admin/avatar-frames', component: () => import('./views/AdminAvatarFramesView.vue'), meta: { admin: true, title: '头像框管理' } },
+    { path: '/admin/points', component: () => import('./views/AdminPointsView.vue'), meta: { admin: true, title: '积分与活动管理' } },
   ],
 })
 

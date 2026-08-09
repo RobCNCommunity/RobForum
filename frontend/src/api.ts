@@ -138,6 +138,20 @@ export interface Badge { id: number; slug: string; name: string; description: st
 export interface UserProgress { experience: number; total_checkins: number; current_streak: number; longest_streak: number; last_checkin_date?: string; checked_in_today: boolean; level: number; level_name: string; level_min_experience: number; next_level_experience: number; level_progress: number }
 export interface CheckinRecord { date: string; experience_awarded: number; streak: number; created_at: string }
 export interface CheckinSummary { progress: UserProgress; history: CheckinRecord[]; badges: Badge[]; newly_awarded: Badge[] }
+export interface PointAccount { user_id: number; balance: number; total_earned: number; total_spent: number; updated_at: string; user_name?: string; user_avatar?: string }
+export interface PointLedger { id: number; user_id: number; amount: number; type: string; source_id?: number; balance_after: number; note: string; created_at: string }
+export interface PointSummary { account: PointAccount; entries: PointLedger[] }
+export interface PointProduct { id: number; name: string; image_url: string; points_required: number; shipping_points: number; stock: number; physical: boolean; description: string; status: string; sort_order: number; created_at: string; updated_at: string }
+export interface ShippingAddress { name: string; phone: string; province: string; city: string; district: string; detail: string }
+export interface PointOrder { id: number; order_no: string; user_id: number; user_name?: string; product_id: number; product_name: string; product_image: string; points_spent: number; shipping_points: number; physical: boolean; address?: ShippingAddress; carrier?: string; tracking_no?: string; status: string; note: string; ordered_at: string; updated_at: string }
+export interface PointTracking { order_id: number; order_no: string; carrier: string; tracking_no: string; order_status: string; query_url: string; updated_at: string }
+export type LotteryPrizeType = 'points' | 'membership' | 'wallet' | 'physical' | 'custom'
+export interface LotteryPrize { id: number; activity_id: number; name: string; image_url: string; probability_bp: number; stock: number; prize_type: LotteryPrizeType; bound_id?: number; config_json: string; physical: boolean; sort_order: number; created_at: string; updated_at: string }
+export interface LotteryActivity { id: number; name: string; cover_url: string; description: string; style: 'wheel' | 'scratch'; cost_points: number; daily_limit: number; total_limit: number; daily_free_attempts: number; starts_at: string; ends_at: string; status: string; sort_order: number; prizes: LotteryPrize[]; created_at: string; updated_at: string }
+export interface LotteryWin { id: number; user_id: number; user_name?: string; activity_id: number; activity_name?: string; prize_id: number; prize_name: string; prize_type: LotteryPrizeType; physical: boolean; status: string; order_id?: number; address?: ShippingAddress; delivered_at?: string; won_at: string }
+export interface LotteryDrawResult { won: boolean; prize?: LotteryPrize; win?: LotteryWin; points_charged: number; balance: number }
+export interface LotteryActivityStats { activity_id: number; activity_name: string; draw_count: number; unique_users: number; win_count: number; delivered_count: number; pending_count: number; points_spent: number; win_rate_bp: number }
+export interface PointsDashboard { account_count: number; total_balance: number; total_earned: number; total_spent: number; product_count: number; order_count: number; pending_orders: number; draw_count: number; win_count: number; pending_wins: number; activities: LotteryActivityStats[] }
 
 export interface Board { id: number; slug: string; name: string; description: string; icon: string; post_count: number }
 export interface PostMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }

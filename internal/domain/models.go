@@ -663,3 +663,177 @@ type RedeemCode struct {
 	CreatedBy      int64      `json:"created_by"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
+
+type PointAccount struct {
+	UserID      int64     `json:"user_id"`
+	Balance     int64     `json:"balance"`
+	TotalEarned int64     `json:"total_earned"`
+	TotalSpent  int64     `json:"total_spent"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	UserName    string    `json:"user_name,omitempty"`
+	UserAvatar  string    `json:"user_avatar,omitempty"`
+}
+
+type PointLedger struct {
+	ID           int64     `json:"id"`
+	UserID       int64     `json:"user_id"`
+	Amount       int64     `json:"amount"`
+	EntryType    string    `json:"type"`
+	SourceID     int64     `json:"source_id,omitempty"`
+	BalanceAfter int64     `json:"balance_after"`
+	Note         string    `json:"note"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type PointSummary struct {
+	Account PointAccount  `json:"account"`
+	Entries []PointLedger `json:"entries"`
+}
+
+type PointProduct struct {
+	ID             int64     `json:"id"`
+	Name           string    `json:"name"`
+	ImageURL       string    `json:"image_url"`
+	PointsRequired int64     `json:"points_required"`
+	ShippingPoints int64     `json:"shipping_points"`
+	Stock          int64     `json:"stock"`
+	Physical       bool      `json:"physical"`
+	Description    string    `json:"description"`
+	Status         string    `json:"status"`
+	SortOrder      int       `json:"sort_order"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type ShippingAddress struct {
+	Name     string `json:"name"`
+	Phone    string `json:"phone"`
+	Province string `json:"province"`
+	City     string `json:"city"`
+	District string `json:"district"`
+	Detail   string `json:"detail"`
+}
+
+type PointOrder struct {
+	ID             int64            `json:"id"`
+	OrderNo        string           `json:"order_no"`
+	UserID         int64            `json:"user_id"`
+	UserName       string           `json:"user_name,omitempty"`
+	ProductID      int64            `json:"product_id"`
+	ProductName    string           `json:"product_name"`
+	ProductImage   string           `json:"product_image"`
+	PointsSpent    int64            `json:"points_spent"`
+	ShippingPoints int64            `json:"shipping_points"`
+	Physical       bool             `json:"physical"`
+	Address        *ShippingAddress `json:"address,omitempty"`
+	Carrier        string           `json:"carrier,omitempty"`
+	TrackingNo     string           `json:"tracking_no,omitempty"`
+	Status         string           `json:"status"`
+	Note           string           `json:"note"`
+	OrderedAt      time.Time        `json:"ordered_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
+}
+
+type PointOrderFilter struct {
+	Status    string
+	ProductID int64
+	UserID    int64
+	StartedAt *time.Time
+	EndedAt   *time.Time
+}
+
+type PointTracking struct {
+	OrderID     int64     `json:"order_id"`
+	OrderNo     string    `json:"order_no"`
+	Carrier     string    `json:"carrier"`
+	TrackingNo  string    `json:"tracking_no"`
+	OrderStatus string    `json:"order_status"`
+	QueryURL    string    `json:"query_url"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type LotteryActivity struct {
+	ID                int64          `json:"id"`
+	Name              string         `json:"name"`
+	CoverURL          string         `json:"cover_url"`
+	Description       string         `json:"description"`
+	Style             string         `json:"style"`
+	CostPoints        int64          `json:"cost_points"`
+	DailyLimit        int            `json:"daily_limit"`
+	TotalLimit        int            `json:"total_limit"`
+	DailyFreeAttempts int            `json:"daily_free_attempts"`
+	StartsAt          time.Time      `json:"starts_at"`
+	EndsAt            time.Time      `json:"ends_at"`
+	Status            string         `json:"status"`
+	SortOrder         int            `json:"sort_order"`
+	Prizes            []LotteryPrize `json:"prizes,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+type LotteryPrize struct {
+	ID            int64     `json:"id"`
+	ActivityID    int64     `json:"activity_id"`
+	Name          string    `json:"name"`
+	ImageURL      string    `json:"image_url"`
+	ProbabilityBP int       `json:"probability_bp"`
+	Stock         int64     `json:"stock"`
+	PrizeType     string    `json:"prize_type"`
+	BoundID       int64     `json:"bound_id,omitempty"`
+	ConfigJSON    string    `json:"config_json"`
+	Physical      bool      `json:"physical"`
+	SortOrder     int       `json:"sort_order"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type LotteryWin struct {
+	ID           int64            `json:"id"`
+	UserID       int64            `json:"user_id"`
+	UserName     string           `json:"user_name,omitempty"`
+	ActivityID   int64            `json:"activity_id"`
+	ActivityName string           `json:"activity_name,omitempty"`
+	PrizeID      int64            `json:"prize_id"`
+	PrizeName    string           `json:"prize_name"`
+	PrizeType    string           `json:"prize_type"`
+	Physical     bool             `json:"physical"`
+	Status       string           `json:"status"`
+	OrderID      int64            `json:"order_id,omitempty"`
+	Address      *ShippingAddress `json:"address,omitempty"`
+	DeliveredAt  *time.Time       `json:"delivered_at,omitempty"`
+	WonAt        time.Time        `json:"won_at"`
+}
+
+type LotteryDrawResult struct {
+	Won           bool          `json:"won"`
+	Prize         *LotteryPrize `json:"prize,omitempty"`
+	Win           *LotteryWin   `json:"win,omitempty"`
+	PointsCharged int64         `json:"points_charged"`
+	Balance       int64         `json:"balance"`
+}
+
+type LotteryActivityStats struct {
+	ActivityID     int64  `json:"activity_id"`
+	ActivityName   string `json:"activity_name"`
+	DrawCount      int64  `json:"draw_count"`
+	UniqueUsers    int64  `json:"unique_users"`
+	WinCount       int64  `json:"win_count"`
+	DeliveredCount int64  `json:"delivered_count"`
+	PendingCount   int64  `json:"pending_count"`
+	PointsSpent    int64  `json:"points_spent"`
+	WinRateBP      int64  `json:"win_rate_bp"`
+}
+
+type PointsDashboard struct {
+	AccountCount  int64                  `json:"account_count"`
+	TotalBalance  int64                  `json:"total_balance"`
+	TotalEarned   int64                  `json:"total_earned"`
+	TotalSpent    int64                  `json:"total_spent"`
+	ProductCount  int64                  `json:"product_count"`
+	OrderCount    int64                  `json:"order_count"`
+	PendingOrders int64                  `json:"pending_orders"`
+	DrawCount     int64                  `json:"draw_count"`
+	WinCount      int64                  `json:"win_count"`
+	PendingWins   int64                  `json:"pending_wins"`
+	Activities    []LotteryActivityStats `json:"activities"`
+}

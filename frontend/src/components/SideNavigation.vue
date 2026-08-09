@@ -27,6 +27,9 @@ const sections = computed(() => [
     { key: '/bookmarks', label: '收藏', icon: 'star' },
     { key: '/settings/profile', label: '资料设置', icon: 'settings' },
     { key: '/check-in', label: '签到与资历', icon: 'calendar' },
+    { key: '/points', label: '积分中心', icon: 'badge' },
+    { key: '/points/store', label: '积分商城', icon: 'shop' },
+    { key: '/lottery', label: '抽奖活动', icon: 'announcement' },
     { key: '/membership', label: '会员中心', icon: 'crown' },
     { key: '/wallet', label: '钱包', icon: 'wallet' },
     { key: '/avatar-frames', label: '头像框市场', icon: 'shop' },
@@ -43,6 +46,7 @@ const sections = computed(() => [
     { key: '/admin/users', label: '用户管理', icon: 'members' },
     { key: '/admin/posts', label: '内容审核', icon: 'document' },
     { key: '/admin/avatar-frames', label: '头像框管理', icon: 'badge' },
+    { key: '/admin/points', label: '积分与活动', icon: 'shop' },
   ]}] : []),
 ])
 

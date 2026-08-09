@@ -211,7 +211,15 @@ func (s *Store) Checkin(userID int64) (domain.CheckinSummary, error) {
 	}
 	awardedExperience := 10 + bonusDays*2
 	experience += int64(awardedExperience)
-	if _, err := tx.Exec(`INSERT INTO user_checkins (user_id, checkin_date, experience_awarded, streak, created_at) VALUES (?, ?, ?, ?, ?)`, userID, today, awardedExperience, current, now); err != nil {
+	checkinResult, err := tx.Exec(`INSERT INTO user_checkins (user_id, checkin_date, experience_awarded, streak, created_at) VALUES (?, ?, ?, ?, ?)`, userID, today, awardedExperience, current, now)
+	if err != nil {
+		return domain.CheckinSummary{}, err
+	}
+	checkinID, err := checkinResult.LastInsertId()
+	if err != nil {
+		return domain.CheckinSummary{}, err
+	}
+	if _, err := applyPointsTx(tx, userID, int64(awardedExperience), checkinID, "checkin", "每日签到", now); err != nil {
 		return domain.CheckinSummary{}, err
 	}
 	if _, err := tx.Exec(`UPDATE user_progress SET experience = ?, total_checkins = ?, current_streak = ?, longest_streak = ?, last_checkin_date = ?, updated_at = ? WHERE user_id = ?`, experience, total, current, longest, today, now, userID); err != nil {
