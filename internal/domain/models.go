@@ -771,6 +771,16 @@ type LotteryActivity struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
+type RobloxMusic struct {
+	AssetID      int64     `json:"asset_id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description,omitempty"`
+	CreatorName  string    `json:"creator_name,omitempty"`
+	ThumbnailURL string    `json:"thumbnail_url,omitempty"`
+	Favorited    bool      `json:"favorited"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+}
+
 type LotteryPrize struct {
 	ID            int64     `json:"id"`
 	ActivityID    int64     `json:"activity_id"`

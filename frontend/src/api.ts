@@ -152,6 +152,7 @@ export interface LotteryWin { id: number; user_id: number; user_name?: string; a
 export interface LotteryDrawResult { won: boolean; prize?: LotteryPrize; win?: LotteryWin; points_charged: number; balance: number }
 export interface LotteryActivityStats { activity_id: number; activity_name: string; draw_count: number; unique_users: number; win_count: number; delivered_count: number; pending_count: number; points_spent: number; win_rate_bp: number }
 export interface PointsDashboard { account_count: number; total_balance: number; total_earned: number; total_spent: number; product_count: number; order_count: number; pending_orders: number; draw_count: number; win_count: number; pending_wins: number; activities: LotteryActivityStats[] }
+export interface RobloxMusic { asset_id: number; name: string; description?: string; creator_name?: string; thumbnail_url?: string; favorited: boolean; created_at?: string }
 
 export interface Board { id: number; slug: string; name: string; description: string; icon: string; post_count: number }
 export interface PostMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }

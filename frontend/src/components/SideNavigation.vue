@@ -30,6 +30,7 @@ const sections = computed(() => [
     { key: '/points', label: '积分中心', icon: 'badge' },
     { key: '/points/store', label: '积分商城', icon: 'shop' },
     { key: '/lottery', label: '抽奖活动', icon: 'announcement' },
+    { key: '/music', label: '音乐库', icon: 'soundOn' },
     { key: '/membership', label: '会员中心', icon: 'crown' },
     { key: '/wallet', label: '钱包', icon: 'wallet' },
     { key: '/avatar-frames', label: '头像框市场', icon: 'shop' },

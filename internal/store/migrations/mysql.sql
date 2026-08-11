@@ -280,6 +280,19 @@ CREATE TABLE IF NOT EXISTS post_reposts (
   CONSTRAINT fk_post_reposts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS roblox_music_favorites (
+  user_id BIGINT NOT NULL,
+  asset_id BIGINT NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  description TEXT NOT NULL,
+  creator_name VARCHAR(255) NOT NULL,
+  thumbnail_url VARCHAR(500) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (user_id, asset_id),
+  INDEX idx_roblox_music_favorites_user (user_id, created_at),
+  CONSTRAINT fk_roblox_music_favorites_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS notifications (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT NOT NULL,

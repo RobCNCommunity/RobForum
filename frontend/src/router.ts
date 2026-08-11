@@ -25,6 +25,7 @@ const router = createRouter({
     { path: '/points', component: () => import('./views/PointsView.vue'), meta: { requiresAuth: true, title: '积分中心' } },
     { path: '/points/store', component: () => import('./views/PointsStoreView.vue'), meta: { requiresAuth: true, title: '积分商城' } },
     { path: '/lottery', component: () => import('./views/LotteryView.vue'), meta: { requiresAuth: true, title: '抽奖活动' } },
+    { path: '/music', component: () => import('./views/RobloxMusicView.vue'), meta: { requiresAuth: true, title: 'Roblox 音乐库' } },
     { path: '/settings/profile', component: () => import('./views/ProfileSettingsView.vue'), meta: { requiresAuth: true, title: '资料设置' } },
     { path: '/verification/apply', component: () => import('./views/VerificationApplyView.vue'), meta: { requiresAuth: true, title: '蓝微认证' } },
     { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },
