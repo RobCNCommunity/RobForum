@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,17 +65,16 @@ func fetchRobloxAsset(assetID int64) (domain.RobloxMusic, error) {
 }
 
 func (s *Server) lookupRobloxMusic(w http.ResponseWriter, r *http.Request) {
-	id, err := parseRobloxAssetID(r.URL.Query().Get("query"))
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		query = r.URL.Query().Get("query")
+	}
+	items, err := s.store.ListApprovedRobloxMusic(query)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "music_invalid", err.Error())
+		writeError(w, http.StatusInternalServerError, "music_failed", "音乐库加载失败")
 		return
 	}
-	item, err := fetchRobloxAsset(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "music_not_found", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (s *Server) listMyRobloxMusic(w http.ResponseWriter, r *http.Request) {
@@ -92,9 +92,9 @@ func (s *Server) favoriteRobloxMusic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "music_invalid", "Roblox 音乐 ID 无效")
 		return
 	}
-	item, err := fetchRobloxAsset(id)
+	item, err := s.store.ApprovedRobloxMusic(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "music_not_found", err.Error())
+		writeError(w, http.StatusNotFound, "music_not_found", "该音乐尚未通过审核或不存在")
 		return
 	}
 	if err := s.store.SaveRobloxMusicFavorite(currentUser(r).ID, item); err != nil {
@@ -116,4 +116,64 @@ func (s *Server) unfavoriteRobloxMusic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"asset_id": id, "favorited": false})
+}
+
+func (s *Server) createRobloxMusicSubmission(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		AssetID  int64  `json:"asset_id"`
+		Name     string `json:"name"`
+		ImageURL string `json:"image_url"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := s.store.CreateRobloxMusicSubmission(currentUser(r).ID, input.AssetID, input.Name, input.ImageURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "music_submission_invalid", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) listMyRobloxMusicSubmissions(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ListMyRobloxMusicSubmissions(currentUser(r).ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "music_submissions_failed", "音乐投稿记录加载失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) listAdminRobloxMusicSubmissions(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ListAdminRobloxMusicSubmissions(r.URL.Query().Get("status"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "music_submissions_invalid", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) reviewAdminRobloxMusicSubmission(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "submissionID")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "music_submission_invalid", "音乐投稿无效")
+		return
+	}
+	var input struct {
+		Status string `json:"status"`
+		Note   string `json:"note"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := s.store.ReviewRobloxMusicSubmission(currentUser(r).ID, id, input.Status, input.Note)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "music_submission_not_found", "音乐投稿不存在")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "music_submission_review_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

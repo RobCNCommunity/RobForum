@@ -153,6 +153,7 @@ export interface LotteryDrawResult { won: boolean; prize?: LotteryPrize; win?: L
 export interface LotteryActivityStats { activity_id: number; activity_name: string; draw_count: number; unique_users: number; win_count: number; delivered_count: number; pending_count: number; points_spent: number; win_rate_bp: number }
 export interface PointsDashboard { account_count: number; total_balance: number; total_earned: number; total_spent: number; product_count: number; order_count: number; pending_orders: number; draw_count: number; win_count: number; pending_wins: number; activities: LotteryActivityStats[] }
 export interface RobloxMusic { asset_id: number; name: string; description?: string; creator_name?: string; thumbnail_url?: string; favorited: boolean; created_at?: string }
+export interface RobloxMusicSubmission { id: number; user_id: number; user_name: string; user_avatar?: string; asset_id: number; name: string; image_url: string; status: 'pending' | 'approved' | 'rejected'; review_note?: string; reviewed_by?: number; reviewed_at?: string; created_at: string; updated_at: string }
 
 export interface Board { id: number; slug: string; name: string; description: string; icon: string; post_count: number }
 export interface PostMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
@@ -415,6 +416,12 @@ export async function updateOAuth(input: OAuthConfig) { return data<OAuthConfig>
 export async function deleteOAuth(id: number) { return data<{ deleted: boolean }>(await api.delete(`/admin/oauth/${id}`)) }
 export function resourceDownloadURL(id: number) { return `/api/v1/resources/${id}/download` }
 export function adminResourceDownloadURL(id: number) { return `/api/v1/admin/resources/${id}/download` }
+
+export async function fetchRobloxMusic(q = '') { return data<RobloxMusic[]>(await api.get('/roblox/music', { params: { q } })) }
+export async function createRobloxMusicSubmission(input: { asset_id: number; name: string; image_url: string }) { return data<RobloxMusicSubmission>(await api.post('/roblox/music/submissions', input)) }
+export async function fetchMyRobloxMusicSubmissions() { return data<RobloxMusicSubmission[]>(await api.get('/me/roblox/music/submissions')) }
+export async function fetchAdminRobloxMusicSubmissions(status = 'pending') { return data<RobloxMusicSubmission[]>(await api.get('/admin/roblox/music', { params: { status } })) }
+export async function reviewAdminRobloxMusicSubmission(id: number, status: 'approved' | 'rejected', note = '') { return data<RobloxMusicSubmission>(await api.patch(`/admin/roblox/music/${id}`, { status, note })) }
 
 
 export async function fetchAds() { return data<AdSlot[]>(await api.get('/ads')) }

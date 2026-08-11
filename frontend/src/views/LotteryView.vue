@@ -12,6 +12,8 @@ const errorMessage = ref('')
 const claimWin = ref<LotteryWin | null>(null)
 const marqueeRoot = ref<HTMLElement | null>(null)
 const marqueeTarget = ref(-1)
+const scratchKey = ref(0)
+const scratchRevealed = ref(false)
 const address = reactive({ name: '', phone: '', province: '', city: '', district: '', detail: '' })
 
 const marqueePrizes = computed(() => {
@@ -51,20 +53,32 @@ function marqueeEnded() {
   void load()
 }
 
-async function drawScratch() {
-  if (!selected.value || spinning.value) return
-  spinning.value = true
-  result.value = null
+async function startScratch() {
+	if (!selected.value || spinning.value) return
+	spinning.value = true
+	result.value = null
+	scratchRevealed.value = false
   errorMessage.value = ''
   try {
-    const response = await api.post(`/lottery/activities/${selected.value.id}/draw`)
-    result.value = response.data.data
-    await load()
+		const response = await api.post(`/lottery/activities/${selected.value.id}/draw`)
+		result.value = response.data.data
+		scratchKey.value += 1
   } catch (error: any) {
     errorMessage.value = error?.response?.data?.error?.message || '抽奖失败'
   } finally {
     spinning.value = false
   }
+}
+
+function scratchOpened() {
+	scratchRevealed.value = true
+	void load()
+}
+
+function selectActivity(activity: LotteryActivity) {
+	selected.value = activity
+	result.value = null
+	scratchRevealed.value = false
 }
 
 async function claim() {
@@ -85,11 +99,11 @@ onMounted(load)
 <template>
   <section class="rf-page lottery-page">
     <header class="rf-page-header"><div class="rf-page-heading"><p class="lottery-kicker">COMMUNITY REWARDS</p><h1>抽奖活动</h1><p>使用积分参与活动，中奖后积分奖品即时到账。</p></div></header>
-    <div class="activity-tabs"><button v-for="activity in activities" :key="activity.id" :class="{ active: selected?.id === activity.id }" type="button" @click="selected = activity">{{ activity.name }}</button><nut-empty v-if="!activities.length" description="暂无进行中的活动" /></div>
+    <div class="activity-tabs"><button v-for="activity in activities" :key="activity.id" :class="{ active: selected?.id === activity.id }" type="button" @click="selectActivity(activity)">{{ activity.name }}</button><nut-empty v-if="!activities.length" description="暂无进行中的活动" /></div>
     <template v-if="selected">
       <div class="lottery-layout">
         <section class="lottery-stage" aria-label="抽奖区域">
-          <div v-if="selected.style === 'scratch'" class="scratch-stage"><nut-scratch-card :content="result?.prize?.name || '刮开查看结果'" :height="220" :width="320" cover-color="#a5b4c4" @open="drawScratch" /><small>刮开卡片后提交一次抽奖</small></div>
+          <div v-if="selected.style === 'scratch'" class="scratch-stage"><button v-if="!result" class="rf-primary-button draw-button" type="button" :disabled="spinning" @click="startScratch"><AppIcon name="code" size="17" />{{ spinning ? '准备刮刮卡中' : `消耗 ${selected.cost_points} 积分开始` }}</button><nut-scratch-card v-else :key="scratchKey" :content="result.prize?.name || '谢谢参与'" :height="220" :width="320" :ratio="0.3" cover-color="#a5b4c4" @open="scratchOpened" /><small>{{ result ? '刮开覆盖层查看本次结果' : '开始后生成本次刮刮卡' }}</small></div>
           <template v-else>
             <div ref="marqueeRoot" class="marquee-frame"><nut-marquee :prize-list="marqueePrizes" :prize-index="marqueeTarget" :speed="120" :circle="26" @end-turns="marqueeEnded" /></div>
             <button class="rf-primary-button draw-button" type="button" :disabled="spinning" @click="startMarquee"><AppIcon name="code" size="17" />{{ spinning ? '滚动开奖中' : `消耗 ${selected.cost_points} 积分开始` }}</button>
@@ -98,7 +112,7 @@ onMounted(load)
         </section>
         <aside class="lottery-info"><div class="lottery-info-head"><div><span class="lottery-label">ACTIVE EVENT</span><h2>{{ selected.name }}</h2></div><span class="cost-badge">{{ selected.cost_points }} 积分</span></div><p>{{ selected.description || '社区限时抽奖活动' }}</p><dl class="lottery-stats"><div><dt>每日上限</dt><dd>{{ selected.daily_limit || '不限' }}</dd></div><div><dt>免费次数</dt><dd>{{ selected.daily_free_attempts }}</dd></div><div><dt>奖品数量</dt><dd>{{ selected.prizes.length }}</dd></div></dl><div class="prize-list"><div v-for="prize in selected.prizes" :key="prize.id"><span>{{ prize.name }}</span><small>{{ (prize.probability_bp / 100).toFixed(2) }}%</small></div></div></aside>
       </div>
-      <div v-if="result" class="result-banner"><strong>{{ result.won ? '恭喜你抽中了' : '再接再厉' }}</strong><span>{{ result.prize?.name || '谢谢参与' }}</span><small>当前积分 {{ result.balance.toLocaleString() }}</small></div>
+      <div v-if="result && (selected.style !== 'scratch' || scratchRevealed)" class="result-banner"><strong>{{ result.won ? '恭喜你抽中了' : '再接再厉' }}</strong><span>{{ result.prize?.name || '谢谢参与' }}</span><small>当前积分 {{ result.balance.toLocaleString() }}</small></div>
     </template>
     <p v-if="errorMessage" class="lottery-error" role="alert">{{ errorMessage }}</p>
     <section class="wins"><div class="section-title"><h2>我的中奖记录</h2><span>最近 100 条</span></div><div v-for="win in wins" :key="win.id" class="win-row"><strong>{{ win.prize_name }}</strong><span>{{ win.activity_name }}</span><small>{{ new Date(win.won_at).toLocaleString() }}</small><button v-if="win.physical && win.status === 'pending'" class="rf-text-button" type="button" @click="claimWin = win">填写地址</button></div><nut-empty v-if="!wins.length" description="暂无中奖记录" /></section>
@@ -118,6 +132,7 @@ onMounted(load)
 .marquee-frame :deep(.nutbig-marquee) { transform: scale(.86); transform-origin: center; }
 .marquee-frame :deep(.nutbig-marquee .start) { pointer-events: none; }
 .scratch-stage { display: flex; align-items: center; flex-direction: column; gap: 12px; }
+.scratch-stage :deep(.nutbig-scratch-card), .scratch-stage :deep(.nut-cover) { touch-action: none; }
 .lottery-stage small, .stage-hint { color: var(--rf-muted); font-size: 12px; }
 .draw-button { min-width: 220px; }
 .lottery-info { min-width: 0; padding: 2px 0; }

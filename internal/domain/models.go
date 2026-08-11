@@ -781,6 +781,22 @@ type RobloxMusic struct {
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 }
 
+type RobloxMusicSubmission struct {
+	ID         int64      `json:"id"`
+	UserID     int64      `json:"user_id"`
+	UserName   string     `json:"user_name"`
+	UserAvatar string     `json:"user_avatar,omitempty"`
+	AssetID    int64      `json:"asset_id"`
+	Name       string     `json:"name"`
+	ImageURL   string     `json:"image_url"`
+	Status     string     `json:"status"`
+	ReviewNote string     `json:"review_note,omitempty"`
+	ReviewedBy int64      `json:"reviewed_by,omitempty"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
 type LotteryPrize struct {
 	ID            int64     `json:"id"`
 	ActivityID    int64     `json:"activity_id"`

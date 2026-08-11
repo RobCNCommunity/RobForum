@@ -293,6 +293,25 @@ CREATE TABLE IF NOT EXISTS roblox_music_favorites (
   CONSTRAINT fk_roblox_music_favorites_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS roblox_music_submissions (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  asset_id BIGINT NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  image_url VARCHAR(500) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  review_note VARCHAR(500) NOT NULL DEFAULT '',
+  reviewed_by BIGINT NULL,
+  reviewed_at DATETIME(6) NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_roblox_music_submissions_asset (asset_id),
+  INDEX idx_roblox_music_submissions_status_created (status, created_at, id),
+  INDEX idx_roblox_music_submissions_user_created (user_id, created_at, id),
+  CONSTRAINT fk_roblox_music_submissions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_roblox_music_submissions_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS notifications (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT NOT NULL,
