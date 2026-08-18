@@ -19,13 +19,13 @@ func TestAvatarFrameAllowedUsesExclusiveUserClass(t *testing.T) {
 	}
 }
 
-func TestAvatarFrameUploadAllowedUsesConfiguredUserClass(t *testing.T) {
+func TestAvatarFrameUploadAllowedOnlyForAdministrators(t *testing.T) {
 	settings := domain.AvatarFrameUploadSettings{AllowRegularUpload: true, AllowMemberUpload: false}
-	if !avatarFrameUploadAllowed(settings, avatarFrameUserContext{role: "user"}) {
-		t.Fatal("regular upload should be enabled")
+	if avatarFrameUploadAllowed(settings, avatarFrameUserContext{role: "user"}) {
+		t.Fatal("regular users should not have an avatar frame upload entry")
 	}
 	if avatarFrameUploadAllowed(settings, avatarFrameUserContext{role: "user", memberActive: true}) {
-		t.Fatal("member upload should use the member switch")
+		t.Fatal("members should not have an avatar frame upload entry")
 	}
 	if !avatarFrameUploadAllowed(domain.AvatarFrameUploadSettings{}, avatarFrameUserContext{role: "admin", memberActive: true}) {
 		t.Fatal("administrator upload should always be enabled")
@@ -57,5 +57,15 @@ func TestNormalizeAvatarFrameRejectsInvalidConfiguration(t *testing.T) {
 	validImage.ImageURL = "/api/v1/media/avatar-frames/0123456789abcdef0123456789abcdef.png"
 	if _, err := normalizeAvatarFrame(validImage); err != nil {
 		t.Fatalf("valid image frame rejected: %v", err)
+	}
+	absoluteImage := validImage
+	absoluteImage.ImageURL = "https://robforum.cn/api/v1/media/avatar-frames/0123456789abcdef0123456789abcdef.png"
+	if normalized, err := normalizeAvatarFrame(absoluteImage); err != nil || normalized.ImageURL != validImage.ImageURL {
+		t.Fatalf("absolute local image URL was not normalized: %#v, %v", normalized, err)
+	}
+	invalidOffset := base
+	invalidOffset.ImageOffsetX = 101
+	if _, err := normalizeAvatarFrame(invalidOffset); err == nil {
+		t.Fatal("out-of-range image offset should be rejected")
 	}
 }

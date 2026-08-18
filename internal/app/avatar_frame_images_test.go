@@ -6,8 +6,44 @@ import (
 	"image/color"
 	"image/gif"
 	"image/png"
+	"net/http"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
+
+func TestAvatarFrameUploadRoutesAreAdminOnly(t *testing.T) {
+	routes, ok := New(nil, "", t.TempDir(), "", nil).Router().(chi.Routes)
+	if !ok {
+		t.Fatal("router does not expose chi routes")
+	}
+
+	registered := make(map[string]bool)
+	if err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		registered[method+" "+route] = true
+		return nil
+	}); err != nil {
+		t.Fatalf("walk routes: %v", err)
+	}
+
+	if !registered["POST /api/v1/admin/avatar-frames/image"] {
+		t.Fatal("admin avatar frame image upload route is missing")
+	}
+	for _, route := range []string{
+		"GET /api/v1/avatar-frame-upload-settings",
+		"POST /api/v1/avatar-frames/image",
+		"POST /api/v1/avatar-frame-submissions",
+		"GET /api/v1/me/avatar-frame-submissions",
+		"GET /api/v1/admin/avatar-frame-upload-settings",
+		"PUT /api/v1/admin/avatar-frame-upload-settings",
+		"GET /api/v1/admin/avatar-frame-submissions",
+		"PATCH /api/v1/admin/avatar-frame-submissions/{submissionID}",
+	} {
+		if registered[route] {
+			t.Fatalf("removed avatar frame submission route is still registered: %s", route)
+		}
+	}
+}
 
 func TestLocalAvatarFrameImageName(t *testing.T) {
 	valid := "/api/v1/media/avatar-frames/0123456789abcdef0123456789abcdef.png"

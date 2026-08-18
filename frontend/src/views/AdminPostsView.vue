@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Notify } from '@nutui/nutui'
-import { errorMessage, fetchAdminContentReports, fetchAdminPosts, moderateAdminPost, reviewAdminContentReport, type ContentReport, type Post } from '@/api'
+import { errorMessage, fetchAdminContentReports, fetchAdminMusicCategories, fetchAdminPosts, fetchAdminRobloxMusicSubmissions, moderateAdminPost, reviewAdminContentReport, reviewAdminRobloxMusicSubmission, type ContentReport, type MusicCategory, type Post, type RobloxMusicSubmission } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import PostMediaGrid from '@/components/PostMediaGrid.vue'
@@ -12,23 +12,28 @@ import VerifiedBadge from '@/components/VerifiedBadge.vue'
 import MembershipBadge from '@/components/MembershipBadge.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
-type ModerationTab = 'posts' | 'reports'
+type ModerationTab = 'posts' | 'reports' | 'music'
 type PostAction = 'published' | 'rejected' | 'hidden' | 'deleted'
 type ReportAction = 'accepted' | 'rejected'
 
 const route = useRoute()
 const router = useRouter()
-const tab = ref<ModerationTab>(route.query.post_id ? 'posts' : route.query.tab === 'reports' ? 'reports' : 'posts')
+const tab = ref<ModerationTab>(route.query.post_id ? 'posts' : route.query.tab === 'reports' ? 'reports' : route.query.tab === 'music' ? 'music' : 'posts')
 const items = ref<Post[]>([])
 const reports = ref<ContentReport[]>([])
+const musicSubmissions = ref<RobloxMusicSubmission[]>([])
+const musicCategories = ref<MusicCategory[]>([])
+const musicCategorySelection = reactive<Record<number, number>>({})
 const loading = ref(true)
 const query = ref('')
 const status = ref(String(route.query.status || (route.query.post_id ? '' : 'pending')))
 const reportStatus = ref<'pending' | 'accepted' | 'rejected'>('pending')
+const musicStatus = ref<'pending' | 'approved' | 'rejected'>('pending')
 const action = reactive<{ item: Post | null; type: PostAction; reason: string; confirmation: string }>({ item: null, type: 'published', reason: '', confirmation: '' })
 const reportReview = reactive<{ item: ContentReport | null; type: ReportAction; note: string }>({ item: null, type: 'accepted', note: '' })
 const submitting = ref(false)
 const reportSubmitting = ref(false)
+const musicSubmitting = ref(false)
 const dialogOpen = computed(() => action.item !== null)
 const reportDialogOpen = computed(() => reportReview.item !== null)
 const reasonRequired = computed(() => action.type !== 'published')
@@ -44,10 +49,18 @@ async function load() {
       reports.value = await fetchAdminContentReports(reportStatus.value)
       return
     }
+    if (tab.value === 'music') {
+      const [submissions, categories] = await Promise.all([fetchAdminRobloxMusicSubmissions(musicStatus.value), fetchAdminMusicCategories()])
+      musicSubmissions.value = submissions
+      musicCategories.value = categories
+      const firstEnabled = categories.find((category) => category.enabled)?.id || 0
+      for (const item of submissions) musicCategorySelection[item.id] = item.category_id || firstEnabled
+      return
+    }
     const postID = Number(route.query.post_id || 0)
     items.value = await fetchAdminPosts({ status: status.value || undefined, q: query.value.trim() || undefined, post_id: postID > 0 ? postID : undefined })
   } catch (error) {
-    Notify.danger(errorMessage(error, tab.value === 'reports' ? '举报审核列表加载失败' : '内容审核列表加载失败'))
+    Notify.danger(errorMessage(error, tab.value === 'reports' ? '举报审核列表加载失败' : tab.value === 'music' ? '音乐投稿列表加载失败' : '内容审核列表加载失败'))
   } finally {
     loading.value = false
   }
@@ -56,9 +69,32 @@ async function load() {
 async function switchTab(next: ModerationTab) {
   if (tab.value === next) return
   tab.value = next
-  if (next === 'reports') await router.replace({ path: '/admin/posts', query: { tab: 'reports' } })
+  if (next === 'reports' || next === 'music') await router.replace({ path: '/admin/posts', query: { tab: next } })
   else await router.replace('/admin/posts')
   await load()
+}
+
+async function reviewMusic(item: RobloxMusicSubmission, status: 'approved' | 'rejected') {
+  let note = ''
+  if (status === 'approved') {
+    if (!musicCategorySelection[item.id]) { Notify.warn('请选择音乐分区后再通过'); return }
+    if (!window.confirm(`确定通过“${item.name}”并加入音乐库吗？`)) return
+  } else {
+    const value = window.prompt(`请输入驳回“${item.name}”的原因`)
+    if (value === null) return
+    note = value.trim()
+    if (!note) { Notify.warn('请填写驳回原因'); return }
+  }
+  musicSubmitting.value = true
+  try {
+    await reviewAdminRobloxMusicSubmission(item.id, status, note, musicCategorySelection[item.id] || item.category_id || 0)
+    Notify.success(status === 'approved' ? '音乐投稿已通过' : '音乐投稿已驳回')
+    await load()
+  } catch (error) {
+    Notify.danger(errorMessage(error, '音乐投稿审核失败'))
+  } finally {
+    musicSubmitting.value = false
+  }
 }
 
 function openAction(item: Post, type: PostAction) {
@@ -176,6 +212,7 @@ onMounted(load)
     <nav class="rf-admin-moderation-tabs" aria-label="内容审核视图">
       <button type="button" :class="{ active: tab === 'posts' }" @click="switchTab('posts')">帖子审核</button>
       <button type="button" :class="{ active: tab === 'reports' }" @click="switchTab('reports')">举报队列</button>
+      <button type="button" :class="{ active: tab === 'music' }" @click="switchTab('music')">音乐投稿</button>
     </nav>
 
     <template v-if="tab === 'posts'">
@@ -210,6 +247,22 @@ onMounted(load)
       </section>
     </template>
 
+    <template v-else-if="tab === 'music'">
+      <form class="rf-admin-filter rf-admin-filter--reports" @submit.prevent="load">
+        <select v-model="musicStatus" class="rf-control rf-control--compact" aria-label="筛选音乐投稿状态" @change="load"><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select>
+        <button type="button" class="rf-icon-text-button" @click="load"><AppIcon name="repost" size="16" />刷新</button>
+      </form>
+      <div v-if="loading" class="rf-list-loading rf-list-loading--wide"><span v-for="n in 4" :key="n" /></div>
+      <div v-else-if="!musicSubmissions.length" class="rf-empty"><AppIcon name="success" size="28" /><strong>当前没有音乐投稿</strong></div>
+      <section v-else class="rf-admin-music-list">
+        <article v-for="item in musicSubmissions" :key="item.id" class="rf-admin-music-row">
+          <div class="rf-admin-music-cover"><img v-if="item.image_url" :src="item.image_url" alt="" /><AppIcon v-else name="soundOn" size="22" /></div>
+          <div><strong>{{ item.name }}</strong><small>Roblox ID {{ item.asset_id }} · 投稿人 {{ item.user_name }} · {{ new Date(item.created_at).toLocaleString('zh-CN') }}</small><p v-if="item.review_note">{{ item.review_note }}</p></div>
+          <span class="rf-status-chip" :class="item.status === 'approved' ? 'is-on' : item.status === 'pending' ? 'is-warning' : 'is-danger'">{{ item.status === 'approved' ? '已通过' : item.status === 'pending' ? '待审核' : '已驳回' }}</span>
+          <div class="rf-admin-music-actions"><label><span>音乐分区</span><select v-if="item.status === 'pending'" v-model.number="musicCategorySelection[item.id]" class="rf-control rf-control--compact"><option :value="0" disabled>请选择</option><option v-for="category in musicCategories.filter((entry) => entry.enabled)" :key="category.id" :value="category.id">{{ category.name }}</option></select><b v-else>{{ item.category_name || '未分区' }}</b></label><div v-if="item.status === 'pending'" class="rf-row-actions"><button type="button" class="rf-primary-button rf-button-small" :disabled="musicSubmitting || !musicCategorySelection[item.id]" @click="reviewMusic(item, 'approved')">通过</button><button type="button" class="rf-danger-button rf-button-small" :disabled="musicSubmitting" @click="reviewMusic(item, 'rejected')">驳回</button></div></div>
+        </article>
+      </section>
+    </template>
     <template v-else>
       <form class="rf-admin-filter rf-admin-filter--reports" @submit.prevent="load">
         <select v-model="reportStatus" class="rf-control rf-control--compact" aria-label="筛选举报状态" @change="load"><option value="pending">被举报</option><option value="accepted">举报成立</option><option value="rejected">未成立</option></select>
@@ -253,7 +306,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.rf-admin-moderation-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: 52px; border-bottom: 1px solid var(--rf-line); }
+.rf-admin-moderation-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); min-height: 52px; border-bottom: 1px solid var(--rf-line); }
 .rf-admin-moderation-tabs button { position: relative; color: var(--rf-text-muted); background: transparent; font-weight: 700; }
 .rf-admin-moderation-tabs button:hover { background: var(--rf-bg-hover); }
 .rf-admin-moderation-tabs button.active { color: var(--rf-text); }
@@ -264,6 +317,19 @@ onMounted(load)
 .rf-admin-search:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent); }
 .rf-admin-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; }
 .rf-admin-search button { align-self: stretch; padding: 0 16px; border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-size: 12px; font-weight: 700; }
+.rf-admin-music-list { border-top: 1px solid var(--rf-line); }
+.rf-admin-music-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--rf-line); }
+.rf-admin-music-cover { display: grid; width: 52px; height: 52px; place-items: center; overflow: hidden; border-radius: 7px; color: var(--primary); background: var(--rf-bg-subtle); }
+.rf-admin-music-cover img { width: 100%; height: 100%; object-fit: cover; }
+.rf-admin-music-row > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.rf-admin-music-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-admin-music-row small, .rf-admin-music-row p { margin: 0; color: var(--rf-muted); font-size: 11px; }
+.rf-admin-music-row p { white-space: pre-wrap; }
+.rf-admin-music-actions { align-items: flex-end; }
+.rf-admin-music-actions label { display: flex; align-items: flex-end; flex-direction: column; gap: 4px; color: var(--rf-muted); font-size: 11px; }
+.rf-admin-music-actions select { min-width: 116px; }
+.rf-admin-music-actions b { color: var(--rf-text); font-size: 12px; }
+@media (max-width: 620px) { .rf-admin-music-row { grid-template-columns: 46px minmax(0, 1fr); padding-inline: 12px; }.rf-admin-music-cover { width: 46px; height: 46px; }.rf-admin-music-row > .rf-status-chip, .rf-admin-music-actions { grid-column: 2; justify-self: start; }.rf-admin-music-actions, .rf-admin-music-actions label { align-items: flex-start; } }
 .rf-admin-post-list, .rf-admin-report-list { border-top: 1px solid var(--rf-line); }
 .rf-admin-post-row, .rf-admin-report-row { padding: 16px; border-bottom: 1px solid var(--rf-line); }
 .rf-admin-post-row > header, .rf-admin-report-row > header { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; }

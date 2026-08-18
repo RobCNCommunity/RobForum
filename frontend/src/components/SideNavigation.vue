@@ -15,6 +15,8 @@ const sections = computed(() => [
     { key: '/', label: '首页', icon: 'home' },
     { key: '/boards/guides', label: '探索', icon: 'category' },
     { key: '/resources', label: '资源', icon: 'shop' },
+    { key: '/news', label: '新闻快报', icon: 'announcement' },
+    { key: '/download', label: '客户端下载', icon: 'download' },
     { key: '/users', label: '用户', icon: 'people' },
     ...(auth.user ? [
       { key: '/notifications', label: '通知', icon: 'notice' },
@@ -40,6 +42,7 @@ const sections = computed(() => [
     { key: '/admin/settings', label: '系统设置', icon: 'settings' },
     { key: '/admin/ads', label: '广告管理', icon: 'image' },
     { key: '/admin/notices', label: '公告管理', icon: 'announcement' },
+    { key: '/admin/music-categories', label: '音乐分区管理', icon: 'category' },
     { key: '/admin/resources', label: '资源审核', icon: 'review' },
     { key: '/admin/payouts', label: '提现审核', icon: 'payout' },
     { key: '/admin/wallet', label: '钱包与兑换码', icon: 'code' },
@@ -62,23 +65,5 @@ async function navigate(key: string) { emit('select'); await router.push(key) }
         <span class="rf-nav-icon"><nut-badge v-if="item.key === '/notifications' && notifications.unread" :value="notifications.unread > 99 ? '99+' : notifications.unread"><AppIcon :name="item.icon" size="22" /></nut-badge><AppIcon v-else :name="item.icon" size="22" /></span><span v-if="!props.compact" class="rf-nav-text">{{ item.label }}</span>
       </button>
     </div>
-    <nut-button
-      v-if="auth.user"
-      class="rf-sidebar-compose"
-      type="primary"
-      @click="navigate('/posts/new')"
-    >
-      <AppIcon name="pen" size="18" />
-      <span v-if="!props.compact">发布</span>
-    </nut-button>
-    <nut-button
-      v-else
-      class="rf-sidebar-compose rf-sidebar-signin"
-      plain
-      @click="navigate('/login')"
-    >
-      <span v-if="!props.compact">登录</span>
-      <AppIcon v-else name="user" size="18" />
-    </nut-button>
   </nav>
 </template>

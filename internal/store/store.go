@@ -182,7 +182,11 @@ func (s *Store) migrate() error {
 		{table: "notifications", name: "conversation_id", def: "BIGINT NULL"},
 		{table: "comments", name: "parent_id", def: "BIGINT NULL"},
 		{table: "notices", name: "link_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
+		{table: "notices", name: "media_json", def: "VARCHAR(16000) NOT NULL DEFAULT '[]'"},
+		{table: "roblox_music_submissions", name: "category_id", def: "BIGINT NULL"},
 		{table: "avatar_frames", name: "image_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
+		{table: "avatar_frames", name: "image_offset_x", def: "INT NOT NULL DEFAULT 0"},
+		{table: "avatar_frames", name: "image_offset_y", def: "INT NOT NULL DEFAULT 0"},
 		{table: "oauth_login_states", name: "provider_key", def: "VARCHAR(64) NOT NULL DEFAULT 'oidc'"},
 	} {
 		if err := s.ensureColumn(column.table, column.name, column.def); err != nil {
@@ -213,6 +217,7 @@ func (s *Store) migrate() error {
 		{table: "users", name: "idx_users_membership_tier", def: "INDEX idx_users_membership_tier (membership_tier_id, membership_expires_at)"},
 		{table: "membership_tiers", name: "idx_membership_tiers_enabled_sort", def: "INDEX idx_membership_tiers_enabled_sort (enabled, sort_order, id)"},
 		{table: "oauth_settings", name: "uq_oauth_settings_provider_key", def: "UNIQUE INDEX uq_oauth_settings_provider_key (provider_key)"},
+		{table: "roblox_music_submissions", name: "idx_roblox_music_submissions_category_status", def: "INDEX idx_roblox_music_submissions_category_status (category_id, status, created_at)"},
 	} {
 		if err := s.ensureIndex(index.table, index.name, index.def); err != nil {
 			return fmt.Errorf("migration index %s.%s failed: %w", index.table, index.name, err)
@@ -220,6 +225,16 @@ func (s *Store) migrate() error {
 	}
 	if err := s.ensureForeignKey("comments", "fk_comments_parent", "FOREIGN KEY (parent_id) REFERENCES comments(id) ON DELETE SET NULL"); err != nil {
 		return fmt.Errorf("migration foreign key comments.fk_comments_parent failed: %w", err)
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`INSERT INTO music_categories (name, sort_order, enabled, created_at, updated_at) SELECT '其他', 999, 1, ?, ? WHERE NOT EXISTS (SELECT 1 FROM music_categories)`, now, now); err != nil {
+		return fmt.Errorf("music category seed failed: %w", err)
+	}
+	if _, err := s.db.Exec(`UPDATE roblox_music_submissions SET category_id = (SELECT id FROM music_categories ORDER BY enabled DESC, sort_order ASC, id ASC LIMIT 1) WHERE category_id IS NULL`); err != nil {
+		return fmt.Errorf("music category backfill failed: %w", err)
+	}
+	if err := s.ensureForeignKey("roblox_music_submissions", "fk_roblox_music_submissions_category", "FOREIGN KEY (category_id) REFERENCES music_categories(id) ON DELETE SET NULL"); err != nil {
+		return fmt.Errorf("migration foreign key roblox_music_submissions.fk_roblox_music_submissions_category failed: %w", err)
 	}
 	if _, err := s.db.Exec(`UPDATE creator_payouts SET net_amount_cents = amount_cents WHERE amount_cents > 0 AND net_amount_cents = 0 AND withdrawal_fee_cents = 0`); err != nil {
 		return fmt.Errorf("creator payout fee backfill failed: %w", err)

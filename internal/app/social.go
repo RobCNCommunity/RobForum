@@ -218,6 +218,20 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"deleted": true})
 }
 
+func (s *Server) deletePost(w http.ResponseWriter, r *http.Request) {
+	postID, err := parsePositiveID(chi.URLParam(r, "postID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "post_id_invalid", "帖子 ID 无效")
+		return
+	}
+	if err := s.store.DeletePost(currentUser(r).ID, postID); err != nil {
+		s.writeModerationStoreError(w, r, err, "post_delete_failed", "帖子删除失败")
+		return
+	}
+	s.reconcileDeletedCommunityMedia()
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
 func (s *Server) togglePostLike(w http.ResponseWriter, r *http.Request) {
 	postID, _ := strconv.ParseInt(chi.URLParam(r, "postID"), 10, 64)
 	liked, count, err := s.store.TogglePostLike(currentUser(r).ID, postID)

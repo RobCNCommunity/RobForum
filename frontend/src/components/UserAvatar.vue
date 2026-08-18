@@ -19,6 +19,8 @@ const style = computed(() => ({
   '--rf-avatar-icon-size': `${Math.max(13, Math.round(props.size * 0.46))}px`,
   '--rf-frame-primary': props.frame?.primary_color || 'transparent',
   '--rf-frame-secondary': props.frame?.secondary_color || 'transparent',
+  '--rf-frame-offset-x': `${props.frame?.image_offset_x || 0}%`,
+  '--rf-frame-offset-y': `${props.frame?.image_offset_y || 0}%`,
 }))
 </script>
 
@@ -120,5 +122,6 @@ const style = computed(() => ({
   width: 100%;
   height: 100%;
   object-fit: contain;
+  transform: translate(var(--rf-frame-offset-x), var(--rf-frame-offset-y));
 }
 </style>

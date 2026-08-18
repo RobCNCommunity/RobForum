@@ -209,10 +209,11 @@ onBeforeUnmount(stopAdTimer)
         </div>
       </header>
 
-      <nut-tabs v-if="isHome" v-model="feedMode" class="rf-feed-tabs" type="line" color="var(--primary)">
-        <nut-tabpane title="为你推荐" pane-key="for-you" />
-        <nut-tabpane title="正在关注" pane-key="following" />
-      </nut-tabs>
+      <nav v-if="isHome" class="rf-feed-tabs" aria-label="首页内容导航">
+        <button type="button" :class="{ active: feedMode === 'for-you' }" @click="feedMode = 'for-you'">为你推荐</button>
+        <button type="button" :class="{ active: feedMode === 'following' }" @click="feedMode = 'following'">正在关注</button>
+        <RouterLink to="/news"><AppIcon name="announcement" size="16" />新闻快报</RouterLink>
+      </nav>
     </div>
 
     <form class="rf-home-mobile-search" role="search" @submit.prevent="submitSearch">
@@ -346,10 +347,12 @@ onBeforeUnmount(stopAdTimer)
 .rf-home-notice > span { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; padding: 0 4px; place-items: center; border: 2px solid var(--rf-bg); border-radius: var(--rf-pill); color: #fff; background: var(--primary); font-size: 10px; font-variant-numeric: tabular-nums; line-height: 1; }
 .rf-notice-sheet article footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .rf-notice-sheet article footer a { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 3px; color: var(--primary); font-size: 12px; font-weight: 700; }
-.rf-feed-tabs { margin: 0 -1px -1px; }
-.rf-feed-tabs :deep(.nut-tabs__content) { display: none; }
-.rf-feed-tabs :deep(.nut-tabs__titles) { min-height: 44px; background: transparent; }
-.rf-feed-tabs :deep(.nut-tabs__titles-item) { min-height: 44px; font-weight: 600; }
+.rf-feed-tabs { display: grid; min-height: 44px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 -1px -1px; }
+.rf-feed-tabs a, .rf-feed-tabs button { position: relative; display: inline-flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; color: var(--rf-muted); background: transparent; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.rf-feed-tabs a:hover, .rf-feed-tabs button:hover { color: var(--rf-text); background: var(--rf-bg-subtle); }
+.rf-feed-tabs button.active { color: var(--primary); }
+.rf-feed-tabs button.active::after { position: absolute; right: 22%; bottom: 0; left: 22%; height: 3px; border-radius: 3px 3px 0 0; background: var(--primary); content: ''; }
+.rf-feed-tabs a { color: var(--primary); font-weight: 700; }
 .rf-home-mobile-search { display: none; }
 .rf-composer { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--rf-line); }
 .rf-composer > a { min-width: 0; flex: 1; color: var(--rf-muted); }.rf-composer > a:hover { color: var(--primary); }.rf-composer .nut-button { flex: 0 0 auto; }

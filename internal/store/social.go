@@ -280,6 +280,48 @@ func (s *Store) DeleteComment(actorID int64, admin bool, commentID int64) ([]str
 	return storedNames, nil
 }
 
+// DeletePost lets an author remove their own post without physically deleting
+// its row. Soft deletion keeps moderation/audit history intact and lets the
+// existing deleted-media cleanup reclaim uploads asynchronously.
+func (s *Store) DeletePost(actorID, postID int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var authorID int64
+	var status string
+	if err := tx.QueryRow(`SELECT author_id, status FROM posts WHERE id = ? FOR UPDATE`, postID).Scan(&authorID, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return moderationError(ModerationErrorNotFound, "帖子不存在")
+		}
+		return err
+	}
+	if status == "deleted" {
+		return moderationError(ModerationErrorConflict, "帖子已删除")
+	}
+	if !canDeletePost(actorID, authorID, status) {
+		return moderationError(ModerationErrorForbidden, "只能删除自己的帖子")
+	}
+
+	now := time.Now().UTC()
+	if _, err := tx.Exec(`UPDATE posts SET status = 'deleted', pinned = 0, featured = 0, comment_count = 0, updated_at = ? WHERE id = ?`, now, postID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE comments SET status = 'deleted' WHERE post_id = ?`, postID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'post', ?, 'post_deleted_by_author', '', ?)`, actorID, postID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func canDeletePost(actorID, authorID int64, status string) bool {
+	return actorID > 0 && authorID > 0 && actorID == authorID && strings.TrimSpace(status) != "" && status != "deleted"
+}
+
 func (s *Store) TogglePostLike(userID, postID int64) (bool, int64, error) {
 	return s.toggleLike("post", userID, postID)
 }

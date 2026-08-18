@@ -38,6 +38,26 @@ func TestCanModeratePost(t *testing.T) {
 	}
 }
 
+func TestCanDeletePost(t *testing.T) {
+	tests := []struct {
+		name              string
+		actorID, authorID int64
+		status            string
+		allowed           bool
+	}{
+		{name: "published author", actorID: 7, authorID: 7, status: "published", allowed: true},
+		{name: "pending author", actorID: 7, authorID: 7, status: "pending", allowed: true},
+		{name: "other user", actorID: 8, authorID: 7, status: "published", allowed: false},
+		{name: "deleted post", actorID: 7, authorID: 7, status: "deleted", allowed: false},
+		{name: "invalid actor", actorID: 0, authorID: 7, status: "published", allowed: false},
+	}
+	for _, test := range tests {
+		if got := canDeletePost(test.actorID, test.authorID, test.status); got != test.allowed {
+			t.Errorf("%s: canDeletePost(%d, %d, %q) = %v, want %v", test.name, test.actorID, test.authorID, test.status, got, test.allowed)
+		}
+	}
+}
+
 func TestValidPostStatusFilter(t *testing.T) {
 	for _, status := range []string{"", "pending", "published", "hidden", "rejected", "deleted"} {
 		if !validPostStatusFilter(status) {

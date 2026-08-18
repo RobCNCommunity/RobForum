@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"roblox-community/internal/domain"
 )
 
 func (s *Server) listPublicAds(w http.ResponseWriter, _ *http.Request) {
@@ -93,17 +94,18 @@ func (s *Server) listAdminNotices(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) createAdminNotice(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Title   string `json:"title"`
-		Content string `json:"content"`
-		LinkURL string `json:"link_url"`
-		Level   string `json:"level"`
-		Pinned  bool   `json:"pinned"`
-		Enabled bool   `json:"enabled"`
+		Title   string               `json:"title"`
+		Content string               `json:"content"`
+		LinkURL string               `json:"link_url"`
+		Media   []domain.NoticeMedia `json:"media"`
+		Level   string               `json:"level"`
+		Pinned  bool                 `json:"pinned"`
+		Enabled bool                 `json:"enabled"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	item, err := s.store.CreateNotice(currentUser(r).ID, input.Title, input.Content, input.LinkURL, input.Level, input.Pinned, input.Enabled)
+	item, err := s.store.CreateNotice(currentUser(r).ID, input.Title, input.Content, input.LinkURL, input.Level, input.Pinned, input.Enabled, input.Media)
 	if err != nil {
 		writeError(w, 400, "notice_create_failed", err.Error())
 		return
@@ -114,17 +116,18 @@ func (s *Server) createAdminNotice(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateAdminNotice(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "noticeID"), 10, 64)
 	var input struct {
-		Title   string `json:"title"`
-		Content string `json:"content"`
-		LinkURL string `json:"link_url"`
-		Level   string `json:"level"`
-		Pinned  bool   `json:"pinned"`
-		Enabled bool   `json:"enabled"`
+		Title   string               `json:"title"`
+		Content string               `json:"content"`
+		LinkURL string               `json:"link_url"`
+		Media   []domain.NoticeMedia `json:"media"`
+		Level   string               `json:"level"`
+		Pinned  bool                 `json:"pinned"`
+		Enabled bool                 `json:"enabled"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	item, err := s.store.UpdateNotice(currentUser(r).ID, id, input.Title, input.Content, input.LinkURL, input.Level, input.Pinned, input.Enabled)
+	item, err := s.store.UpdateNotice(currentUser(r).ID, id, input.Title, input.Content, input.LinkURL, input.Level, input.Pinned, input.Enabled, input.Media)
 	if err != nil {
 		writeError(w, 400, "notice_update_failed", err.Error())
 		return

@@ -69,12 +69,92 @@ func (s *Server) lookupRobloxMusic(w http.ResponseWriter, r *http.Request) {
 	if query == "" {
 		query = r.URL.Query().Get("query")
 	}
-	items, err := s.store.ListApprovedRobloxMusic(query)
+	categoryID, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("category_id")), 10, 64)
+	items, err := s.store.ListApprovedRobloxMusic(query, categoryID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "music_failed", "音乐库加载失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) listMusicCategories(w http.ResponseWriter, _ *http.Request) {
+	items, err := s.store.ListMusicCategories(true)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "music_categories_failed", "音乐分区加载失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) listAdminMusicCategories(w http.ResponseWriter, _ *http.Request) {
+	items, err := s.store.ListMusicCategories(false)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "music_categories_failed", "音乐分区加载失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) createAdminMusicCategory(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name      string `json:"name"`
+		SortOrder int    `json:"sort_order"`
+		Enabled   bool   `json:"enabled"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := s.store.CreateMusicCategory(currentUser(r).ID, input.Name, input.SortOrder, input.Enabled)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "music_category_create_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) updateAdminMusicCategory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "categoryID")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "music_category_invalid", "音乐分区无效")
+		return
+	}
+	var input struct {
+		Name      string `json:"name"`
+		SortOrder int    `json:"sort_order"`
+		Enabled   bool   `json:"enabled"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := s.store.UpdateMusicCategory(currentUser(r).ID, id, input.Name, input.SortOrder, input.Enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "music_category_not_found", "音乐分区不存在")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "music_category_update_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) deleteAdminMusicCategory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "categoryID")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "music_category_invalid", "音乐分区无效")
+		return
+	}
+	err := s.store.DeleteMusicCategory(currentUser(r).ID, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "music_category_not_found", "音乐分区不存在")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "music_category_delete_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func (s *Server) listMyRobloxMusic(w http.ResponseWriter, r *http.Request) {
@@ -120,14 +200,15 @@ func (s *Server) unfavoriteRobloxMusic(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createRobloxMusicSubmission(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		AssetID  int64  `json:"asset_id"`
-		Name     string `json:"name"`
-		ImageURL string `json:"image_url"`
+		AssetID    int64  `json:"asset_id"`
+		Name       string `json:"name"`
+		ImageURL   string `json:"image_url"`
+		CategoryID int64  `json:"category_id"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	item, err := s.store.CreateRobloxMusicSubmission(currentUser(r).ID, input.AssetID, input.Name, input.ImageURL)
+	item, err := s.store.CreateRobloxMusicSubmission(currentUser(r).ID, input.AssetID, input.CategoryID, input.Name, input.ImageURL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "music_submission_invalid", err.Error())
 		return
@@ -160,13 +241,14 @@ func (s *Server) reviewAdminRobloxMusicSubmission(w http.ResponseWriter, r *http
 		return
 	}
 	var input struct {
-		Status string `json:"status"`
-		Note   string `json:"note"`
+		Status     string `json:"status"`
+		Note       string `json:"note"`
+		CategoryID int64  `json:"category_id"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	item, err := s.store.ReviewRobloxMusicSubmission(currentUser(r).ID, id, input.Status, input.Note)
+	item, err := s.store.ReviewRobloxMusicSubmission(currentUser(r).ID, id, input.CategoryID, input.Status, input.Note)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "music_submission_not_found", "音乐投稿不存在")
 		return

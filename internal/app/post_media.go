@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -59,6 +61,12 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 		}
 		media = append(media, item)
 	}
+	content, err := resolvePostMediaPlaceholders(content, media)
+	if err != nil {
+		cleanup()
+		writeError(w, http.StatusBadRequest, "post_media_position_invalid", err.Error())
+		return
+	}
 
 	item, err := s.store.CreateMachineModeratedPostWithTagsAndMedia(currentUser(r).ID, boardID, title, content, tags, media, machineApproved)
 	if err != nil {
@@ -67,6 +75,24 @@ func (s *Server) createPostWithMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func resolvePostMediaPlaceholders(content string, media []store.PostMediaInput) (string, error) {
+	const markerPrefix = "robforum-upload://media/"
+	for index, item := range media {
+		marker := fmt.Sprintf("%s%d", markerPrefix, index)
+		if !strings.Contains(content, marker) {
+			continue
+		}
+		if !isImageMedia(item.MIMEType) {
+			return "", errors.New("只有图片可以插入正文位置")
+		}
+		content = strings.ReplaceAll(content, marker, "/api/v1/media/posts/"+item.StoredName)
+	}
+	if strings.Contains(content, markerPrefix) {
+		return "", errors.New("正文中的图片位置与上传文件不匹配")
+	}
+	return content, nil
 }
 
 func (s *Server) savePostMedia(header *multipart.FileHeader) (store.PostMediaInput, string, error) {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -16,10 +17,10 @@ var (
 	ErrAvatarFrameForbidden   = errors.New("当前身份不能使用这个头像框")
 	ErrAvatarFrameNotOwned    = errors.New("请先购买这个头像框")
 	avatarFrameColorPattern   = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
-	avatarFrameImagePattern   = regexp.MustCompile(`^/api/v1/media/avatar-frames/[0-9a-f]{32}\.(png|jpe?g|gif)$`)
+	avatarFrameImagePattern   = regexp.MustCompile(`^/api/v1/media/avatar-frames/[0-9a-f]{32,40}\.(png|jpe?g|gif)$`)
 )
 
-const avatarFrameColumns = `id, name, description, style, image_url, primary_color, secondary_color, price_cents, allowed_regular, allowed_member, allowed_admin, enabled, sort_order, sales_count, created_at, updated_at`
+const avatarFrameColumns = `id, name, description, style, image_url, image_offset_x, image_offset_y, primary_color, secondary_color, price_cents, allowed_regular, allowed_member, allowed_admin, enabled, sort_order, sales_count, created_at, updated_at`
 
 var avatarFrameStyles = map[string]struct{}{
 	"ring":   {},
@@ -40,6 +41,12 @@ func normalizeAvatarFrame(input domain.AvatarFrame) (domain.AvatarFrame, error) 
 	input.Description = strings.TrimSpace(input.Description)
 	input.Style = strings.ToLower(strings.TrimSpace(input.Style))
 	input.ImageURL = strings.TrimSpace(input.ImageURL)
+	if parsed, parseErr := url.Parse(input.ImageURL); parseErr == nil && parsed.IsAbs() && parsed.Path != "" && parsed.RawQuery == "" && parsed.Fragment == "" {
+		input.ImageURL = parsed.Path
+	}
+	if input.ImageOffsetX < -100 || input.ImageOffsetX > 100 || input.ImageOffsetY < -100 || input.ImageOffsetY > 100 {
+		return input, errors.New("头像框图片坐标需要在 -100 到 100 之间")
+	}
 	input.PrimaryColor = strings.ToLower(strings.TrimSpace(input.PrimaryColor))
 	input.SecondaryColor = strings.ToLower(strings.TrimSpace(input.SecondaryColor))
 	if len([]rune(input.Name)) < 2 || len([]rune(input.Name)) > 80 || containsControl(input.Name) {
@@ -86,7 +93,7 @@ func scanAvatarFrame(scanner rowScanner) (domain.AvatarFrame, error) {
 	var item domain.AvatarFrame
 	var allowedRegular, allowedMember, allowedAdmin, enabled int
 	err := scanner.Scan(
-		&item.ID, &item.Name, &item.Description, &item.Style, &item.ImageURL, &item.PrimaryColor, &item.SecondaryColor,
+		&item.ID, &item.Name, &item.Description, &item.Style, &item.ImageURL, &item.ImageOffsetX, &item.ImageOffsetY, &item.PrimaryColor, &item.SecondaryColor,
 		&item.PriceCents, &allowedRegular, &allowedMember, &allowedAdmin, &enabled, &item.SortOrder,
 		&item.SalesCount, &item.CreatedAt, &item.UpdatedAt,
 	)
@@ -148,7 +155,7 @@ func (s *Store) ListAvatarFrames(userID int64, includeDisabled bool) ([]domain.A
 		var allowedRegular, allowedMember, allowedAdmin, enabled, equipped int
 		var purchasedAt sql.NullTime
 		if err := rows.Scan(
-			&item.ID, &item.Name, &item.Description, &item.Style, &item.ImageURL, &item.PrimaryColor, &item.SecondaryColor,
+			&item.ID, &item.Name, &item.Description, &item.Style, &item.ImageURL, &item.ImageOffsetX, &item.ImageOffsetY, &item.PrimaryColor, &item.SecondaryColor,
 			&item.PriceCents, &allowedRegular, &allowedMember, &allowedAdmin, &enabled, &item.SortOrder,
 			&item.SalesCount, &item.CreatedAt, &item.UpdatedAt, &purchasedAt, &equipped,
 		); err != nil {
@@ -176,7 +183,7 @@ func (s *Store) CreateAvatarFrame(actorID int64, input domain.AvatarFrame) (doma
 		return domain.AvatarFrame{}, err
 	}
 	now := time.Now().UTC()
-	result, err := s.db.Exec(`INSERT INTO avatar_frames (name, description, style, image_url, primary_color, secondary_color, price_cents, allowed_regular, allowed_member, allowed_admin, enabled, sort_order, sales_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, input.Name, input.Description, input.Style, input.ImageURL, input.PrimaryColor, input.SecondaryColor, input.PriceCents, input.AllowedRegular, input.AllowedMember, input.AllowedAdmin, input.Enabled, input.SortOrder, now, now)
+	result, err := s.db.Exec(`INSERT INTO avatar_frames (name, description, style, image_url, image_offset_x, image_offset_y, primary_color, secondary_color, price_cents, allowed_regular, allowed_member, allowed_admin, enabled, sort_order, sales_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, input.Name, input.Description, input.Style, input.ImageURL, input.ImageOffsetX, input.ImageOffsetY, input.PrimaryColor, input.SecondaryColor, input.PriceCents, input.AllowedRegular, input.AllowedMember, input.AllowedAdmin, input.Enabled, input.SortOrder, now, now)
 	if err != nil {
 		return domain.AvatarFrame{}, err
 	}
@@ -197,7 +204,7 @@ func (s *Store) UpdateAvatarFrame(actorID, id int64, input domain.AvatarFrame) (
 		return domain.AvatarFrame{}, err
 	}
 	now := time.Now().UTC()
-	result, err := s.db.Exec(`UPDATE avatar_frames SET name = ?, description = ?, style = ?, image_url = ?, primary_color = ?, secondary_color = ?, price_cents = ?, allowed_regular = ?, allowed_member = ?, allowed_admin = ?, enabled = ?, sort_order = ?, updated_at = ? WHERE id = ?`, input.Name, input.Description, input.Style, input.ImageURL, input.PrimaryColor, input.SecondaryColor, input.PriceCents, input.AllowedRegular, input.AllowedMember, input.AllowedAdmin, input.Enabled, input.SortOrder, now, id)
+	result, err := s.db.Exec(`UPDATE avatar_frames SET name = ?, description = ?, style = ?, image_url = ?, image_offset_x = ?, image_offset_y = ?, primary_color = ?, secondary_color = ?, price_cents = ?, allowed_regular = ?, allowed_member = ?, allowed_admin = ?, enabled = ?, sort_order = ?, updated_at = ? WHERE id = ?`, input.Name, input.Description, input.Style, input.ImageURL, input.ImageOffsetX, input.ImageOffsetY, input.PrimaryColor, input.SecondaryColor, input.PriceCents, input.AllowedRegular, input.AllowedMember, input.AllowedAdmin, input.Enabled, input.SortOrder, now, id)
 	if err != nil {
 		return domain.AvatarFrame{}, err
 	}
@@ -379,7 +386,7 @@ func equippedAvatarFrames(queryer sqlQueryer, userIDs []int64) (map[int64]*domai
 		var allowedRegular, allowedMember, allowedAdmin, enabled, memberActive int
 		var role string
 		if err := rows.Scan(
-			&userID, &item.ID, &item.Name, &item.Description, &item.Style, &item.ImageURL, &item.PrimaryColor, &item.SecondaryColor,
+			&userID, &item.ID, &item.Name, &item.Description, &item.Style, &item.ImageURL, &item.ImageOffsetX, &item.ImageOffsetY, &item.PrimaryColor, &item.SecondaryColor,
 			&item.PriceCents, &allowedRegular, &allowedMember, &allowedAdmin, &enabled, &item.SortOrder,
 			&item.SalesCount, &item.CreatedAt, &item.UpdatedAt, &role, &memberActive,
 		); err != nil {

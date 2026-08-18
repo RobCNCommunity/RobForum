@@ -10,7 +10,7 @@ import (
 	"roblox-community/internal/domain"
 )
 
-var robloxMusicSubmissionColumns = `s.id, s.user_id, u.display_name, u.avatar_url, s.asset_id, s.name, s.image_url, s.status, s.review_note, s.reviewed_by, s.reviewed_at, s.created_at, s.updated_at`
+var robloxMusicSubmissionColumns = `s.id, s.user_id, u.display_name, u.avatar_url, s.asset_id, s.name, s.image_url, s.category_id, COALESCE(c.name, '未分区'), s.status, s.review_note, s.reviewed_by, s.reviewed_at, s.created_at, s.updated_at`
 
 func normalizeRobloxMusicSubmission(assetID int64, name, imageURL string) (string, string, error) {
 	name = strings.TrimSpace(name)
@@ -35,7 +35,11 @@ func scanRobloxMusicSubmission(scanner rowScanner) (domain.RobloxMusicSubmission
 	var item domain.RobloxMusicSubmission
 	var reviewedBy sql.NullInt64
 	var reviewedAt sql.NullTime
-	err := scanner.Scan(&item.ID, &item.UserID, &item.UserName, &item.UserAvatar, &item.AssetID, &item.Name, &item.ImageURL, &item.Status, &item.ReviewNote, &reviewedBy, &reviewedAt, &item.CreatedAt, &item.UpdatedAt)
+	var categoryID sql.NullInt64
+	err := scanner.Scan(&item.ID, &item.UserID, &item.UserName, &item.UserAvatar, &item.AssetID, &item.Name, &item.ImageURL, &categoryID, &item.CategoryName, &item.Status, &item.ReviewNote, &reviewedBy, &reviewedAt, &item.CreatedAt, &item.UpdatedAt)
+	if categoryID.Valid {
+		item.CategoryID = categoryID.Int64
+	}
 	if reviewedBy.Valid {
 		item.ReviewedBy = reviewedBy.Int64
 	}
@@ -46,13 +50,17 @@ func scanRobloxMusicSubmission(scanner rowScanner) (domain.RobloxMusicSubmission
 	return item, err
 }
 
-func (s *Store) ListApprovedRobloxMusic(query string) ([]domain.RobloxMusic, error) {
+func (s *Store) ListApprovedRobloxMusic(query string, categoryID int64) ([]domain.RobloxMusic, error) {
 	query = strings.TrimSpace(query)
 	if len([]rune(query)) > 100 {
 		query = string([]rune(query)[:100])
 	}
-	base := `SELECT s.asset_id, s.name, s.image_url, s.created_at FROM roblox_music_submissions s WHERE s.status = 'approved'`
+	base := `SELECT s.asset_id, s.name, s.image_url, s.category_id, COALESCE(c.name, '未分区'), s.created_at FROM roblox_music_submissions s LEFT JOIN music_categories c ON c.id = s.category_id WHERE s.status = 'approved'`
 	args := []any{}
+	if categoryID > 0 {
+		base += ` AND s.category_id = ?`
+		args = append(args, categoryID)
+	}
 	if query != "" {
 		base += ` AND (s.name LIKE ? OR CAST(s.asset_id AS CHAR) LIKE ?)`
 		like := "%" + query + "%"
@@ -67,17 +75,30 @@ func (s *Store) ListApprovedRobloxMusic(query string) ([]domain.RobloxMusic, err
 	items := make([]domain.RobloxMusic, 0)
 	for rows.Next() {
 		var item domain.RobloxMusic
-		if err := rows.Scan(&item.AssetID, &item.Name, &item.ThumbnailURL, &item.CreatedAt); err != nil {
+		var itemCategoryID sql.NullInt64
+		if err := rows.Scan(&item.AssetID, &item.Name, &item.ThumbnailURL, &itemCategoryID, &item.CategoryName, &item.CreatedAt); err != nil {
 			return nil, err
+		}
+		if itemCategoryID.Valid {
+			item.CategoryID = itemCategoryID.Int64
 		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
 
-func (s *Store) CreateRobloxMusicSubmission(userID, assetID int64, name, imageURL string) (domain.RobloxMusicSubmission, error) {
+func (s *Store) CreateRobloxMusicSubmission(userID, assetID, categoryID int64, name, imageURL string) (domain.RobloxMusicSubmission, error) {
 	name, imageURL, err := normalizeRobloxMusicSubmission(assetID, name, imageURL)
 	if err != nil {
+		return domain.RobloxMusicSubmission{}, err
+	}
+	if categoryID <= 0 {
+		return domain.RobloxMusicSubmission{}, errors.New("请选择音乐分区")
+	}
+	if _, err := s.activeMusicCategory(categoryID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.RobloxMusicSubmission{}, errors.New("所选音乐分区不存在")
+		}
 		return domain.RobloxMusicSubmission{}, err
 	}
 	var existingID, ownerID int64
@@ -94,7 +115,7 @@ func (s *Store) CreateRobloxMusicSubmission(userID, assetID int64, name, imageUR
 		if ownerID != userID {
 			return domain.RobloxMusicSubmission{}, errors.New("该音乐投稿已被驳回，请勿重复投稿")
 		}
-		if _, err := s.db.Exec(`UPDATE roblox_music_submissions SET name = ?, image_url = ?, status = 'pending', review_note = '', reviewed_by = NULL, reviewed_at = NULL, updated_at = ? WHERE id = ?`, name, imageURL, now, existingID); err != nil {
+		if _, err := s.db.Exec(`UPDATE roblox_music_submissions SET name = ?, image_url = ?, category_id = ?, status = 'pending', review_note = '', reviewed_by = NULL, reviewed_at = NULL, updated_at = ? WHERE id = ?`, name, imageURL, categoryID, now, existingID); err != nil {
 			return domain.RobloxMusicSubmission{}, err
 		}
 		return s.robloxMusicSubmissionByID(s.db, existingID, false)
@@ -102,7 +123,7 @@ func (s *Store) CreateRobloxMusicSubmission(userID, assetID int64, name, imageUR
 	if !errors.Is(err, sql.ErrNoRows) {
 		return domain.RobloxMusicSubmission{}, err
 	}
-	result, err := s.db.Exec(`INSERT INTO roblox_music_submissions (user_id, asset_id, name, image_url, status, review_note, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', '', ?, ?)`, userID, assetID, name, imageURL, now, now)
+	result, err := s.db.Exec(`INSERT INTO roblox_music_submissions (user_id, asset_id, name, image_url, category_id, status, review_note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', '', ?, ?)`, userID, assetID, name, imageURL, categoryID, now, now)
 	if err != nil {
 		return domain.RobloxMusicSubmission{}, err
 	}
@@ -114,7 +135,7 @@ func (s *Store) CreateRobloxMusicSubmission(userID, assetID int64, name, imageUR
 }
 
 func (s *Store) robloxMusicSubmissionByID(queryer rowQueryer, id int64, forUpdate bool) (domain.RobloxMusicSubmission, error) {
-	query := `SELECT ` + robloxMusicSubmissionColumns + ` FROM roblox_music_submissions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`
+	query := `SELECT ` + robloxMusicSubmissionColumns + ` FROM roblox_music_submissions s JOIN users u ON u.id = s.user_id LEFT JOIN music_categories c ON c.id = s.category_id WHERE s.id = ?`
 	if forUpdate {
 		query += ` FOR UPDATE`
 	}
@@ -137,7 +158,7 @@ func (s *Store) ListAdminRobloxMusicSubmissions(status string) ([]domain.RobloxM
 }
 
 func (s *Store) listRobloxMusicSubmissions(where string, args ...any) ([]domain.RobloxMusicSubmission, error) {
-	rows, err := s.db.Query(`SELECT `+robloxMusicSubmissionColumns+` FROM roblox_music_submissions s JOIN users u ON u.id = s.user_id `+where+` ORDER BY s.created_at DESC, s.id DESC LIMIT 200`, args...)
+	rows, err := s.db.Query(`SELECT `+robloxMusicSubmissionColumns+` FROM roblox_music_submissions s JOIN users u ON u.id = s.user_id LEFT JOIN music_categories c ON c.id = s.category_id `+where+` ORDER BY s.created_at DESC, s.id DESC LIMIT 200`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +174,7 @@ func (s *Store) listRobloxMusicSubmissions(where string, args ...any) ([]domain.
 	return items, rows.Err()
 }
 
-func (s *Store) ReviewRobloxMusicSubmission(actorID, submissionID int64, status, note string) (domain.RobloxMusicSubmission, error) {
+func (s *Store) ReviewRobloxMusicSubmission(actorID, submissionID, categoryID int64, status, note string) (domain.RobloxMusicSubmission, error) {
 	status = strings.ToLower(strings.TrimSpace(status))
 	note = strings.TrimSpace(note)
 	if status != "approved" && status != "rejected" {
@@ -177,8 +198,23 @@ func (s *Store) ReviewRobloxMusicSubmission(actorID, submissionID int64, status,
 	if item.Status != "pending" {
 		return domain.RobloxMusicSubmission{}, errors.New("该音乐投稿已处理")
 	}
+	if categoryID <= 0 {
+		categoryID = item.CategoryID
+	}
+	if status == "approved" {
+		category, categoryErr := s.musicCategoryByID(tx, categoryID)
+		if errors.Is(categoryErr, sql.ErrNoRows) {
+			return domain.RobloxMusicSubmission{}, errors.New("请选择有效的音乐分区")
+		}
+		if categoryErr != nil {
+			return domain.RobloxMusicSubmission{}, categoryErr
+		}
+		if !category.Enabled {
+			return domain.RobloxMusicSubmission{}, errors.New("所选音乐分区已下架")
+		}
+	}
 	now := time.Now().UTC()
-	if _, err := tx.Exec(`UPDATE roblox_music_submissions SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`, status, note, actorID, now, now, submissionID); err != nil {
+	if _, err := tx.Exec(`UPDATE roblox_music_submissions SET status = ?, category_id = ?, review_note = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`, status, categoryID, note, actorID, now, now, submissionID); err != nil {
 		return domain.RobloxMusicSubmission{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -189,6 +225,10 @@ func (s *Store) ReviewRobloxMusicSubmission(actorID, submissionID int64, status,
 
 func (s *Store) ApprovedRobloxMusic(assetID int64) (domain.RobloxMusic, error) {
 	var item domain.RobloxMusic
-	err := s.db.QueryRow(`SELECT asset_id, name, image_url, created_at FROM roblox_music_submissions WHERE asset_id = ? AND status = 'approved'`, assetID).Scan(&item.AssetID, &item.Name, &item.ThumbnailURL, &item.CreatedAt)
+	var categoryID sql.NullInt64
+	err := s.db.QueryRow(`SELECT s.asset_id, s.name, s.image_url, s.category_id, COALESCE(c.name, '未分区'), s.created_at FROM roblox_music_submissions s LEFT JOIN music_categories c ON c.id = s.category_id WHERE s.asset_id = ? AND s.status = 'approved'`, assetID).Scan(&item.AssetID, &item.Name, &item.ThumbnailURL, &categoryID, &item.CategoryName, &item.CreatedAt)
+	if categoryID.Valid {
+		item.CategoryID = categoryID.Int64
+	}
 	return item, err
 }

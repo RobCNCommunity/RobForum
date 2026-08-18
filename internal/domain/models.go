@@ -152,6 +152,8 @@ type AvatarFrame struct {
 	Description    string     `json:"description"`
 	Style          string     `json:"style"`
 	ImageURL       string     `json:"image_url"`
+	ImageOffsetX   int        `json:"image_offset_x"`
+	ImageOffsetY   int        `json:"image_offset_y"`
 	PrimaryColor   string     `json:"primary_color"`
 	SecondaryColor string     `json:"secondary_color"`
 	PriceCents     int64      `json:"price_cents"`
@@ -568,16 +570,26 @@ type AdSlot struct {
 }
 
 type Notice struct {
-	ID        int64     `json:"id"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	LinkURL   string    `json:"link_url"`
-	Level     string    `json:"level"`
-	Pinned    bool      `json:"pinned"`
-	Enabled   bool      `json:"enabled"`
-	CreatedBy int64     `json:"created_by,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        int64         `json:"id"`
+	Title     string        `json:"title"`
+	Content   string        `json:"content"`
+	LinkURL   string        `json:"link_url"`
+	Media     []NoticeMedia `json:"media,omitempty"`
+	Level     string        `json:"level"`
+	Pinned    bool          `json:"pinned"`
+	Enabled   bool          `json:"enabled"`
+	CreatedBy int64         `json:"created_by,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+type NoticeMedia struct {
+	ID        int64  `json:"id"`
+	URL       string `json:"url"`
+	MIMEType  string `json:"mime_type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 type Badge struct {
@@ -777,24 +789,37 @@ type RobloxMusic struct {
 	Description  string    `json:"description,omitempty"`
 	CreatorName  string    `json:"creator_name,omitempty"`
 	ThumbnailURL string    `json:"thumbnail_url,omitempty"`
+	CategoryID   int64     `json:"category_id,omitempty"`
+	CategoryName string    `json:"category_name,omitempty"`
 	Favorited    bool      `json:"favorited"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 }
 
+type MusicCategory struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	SortOrder int       `json:"sort_order"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type RobloxMusicSubmission struct {
-	ID         int64      `json:"id"`
-	UserID     int64      `json:"user_id"`
-	UserName   string     `json:"user_name"`
-	UserAvatar string     `json:"user_avatar,omitempty"`
-	AssetID    int64      `json:"asset_id"`
-	Name       string     `json:"name"`
-	ImageURL   string     `json:"image_url"`
-	Status     string     `json:"status"`
-	ReviewNote string     `json:"review_note,omitempty"`
-	ReviewedBy int64      `json:"reviewed_by,omitempty"`
-	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID           int64      `json:"id"`
+	UserID       int64      `json:"user_id"`
+	UserName     string     `json:"user_name"`
+	UserAvatar   string     `json:"user_avatar,omitempty"`
+	AssetID      int64      `json:"asset_id"`
+	Name         string     `json:"name"`
+	ImageURL     string     `json:"image_url"`
+	CategoryID   int64      `json:"category_id,omitempty"`
+	CategoryName string     `json:"category_name,omitempty"`
+	Status       string     `json:"status"`
+	ReviewNote   string     `json:"review_note,omitempty"`
+	ReviewedBy   int64      `json:"reviewed_by,omitempty"`
+	ReviewedAt   *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 type LotteryPrize struct {

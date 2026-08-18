@@ -5,6 +5,7 @@ import { Notify } from '@nutui/nutui'
 import {
   createComment,
   deleteComment,
+  deletePost,
   errorMessage,
   fetchBookmarkStatus,
   fetchCommentLike,
@@ -55,6 +56,7 @@ const viewerReplyComposer = ref<CommentComposerHandle | null>(null)
 const replyingTo = ref<Comment | null>(null)
 const loading = ref(true)
 const pinning = ref(false)
+const deletingPost = ref(false)
 const sending = ref(false)
 const preparingCommentMedia = ref(false)
 const commentPreparationLabel = ref('')
@@ -70,9 +72,15 @@ const viewerIndex = ref(0)
 let commentPreparationController: AbortController | undefined
 
 const canPin = computed(() => auth.isAdmin)
+const canDeletePost = computed(() => Boolean(auth.user && post.value && auth.user.id === post.value.author_id))
 const authorHandle = computed(() => post.value ? `@user_${post.value.author_id}` : '')
 const reportOpen = computed(() => reportTarget.value !== null)
 const commentTree = computed(() => buildCommentTree(comments.value))
+const detachedPostMedia = computed(() => {
+  const item = post.value
+  if (!item) return []
+  return (item.media || []).filter((media) => !item.content.includes(media.url))
+})
 const viewerMedia = computed(() => (post.value?.media || []).filter((item) => item.mime_type.startsWith('image/')))
 
 function requestedViewerIndex() {
@@ -251,6 +259,13 @@ function openImageViewer(index: number) {
   viewerOpen.value = true
 }
 
+function openDetachedImage(index: number) {
+  const target = detachedPostMedia.value.filter((item) => item.mime_type.startsWith('image/'))[index]
+  if (!target) return
+  const viewerIndex = viewerMedia.value.findIndex((item) => item.id === target.id && item.url === target.url)
+  openImageViewer(viewerIndex < 0 ? 0 : viewerIndex)
+}
+
 function closeImageViewer() {
   viewerOpen.value = false
 }
@@ -353,6 +368,22 @@ function openCommentReport(item: Comment) {
   if (auth.user.id === item.author_id) return
   if (viewerOpen.value) closeImageViewer()
   reportTarget.value = { type: 'comment', id: item.id, label: `回复：${item.author_name}` }
+}
+
+async function removePost() {
+  if (!post.value || deletingPost.value) return
+  if (!window.confirm('确定删除这篇帖子吗？删除后将无法恢复。')) return
+  deletingPost.value = true
+  postMenuOpen.value = false
+  try {
+    await deletePost(post.value.id)
+    Notify.success('帖子已删除')
+    await router.push('/')
+  } catch (error) {
+    Notify.danger(errorMessage(error, '删除帖子失败'))
+  } finally {
+    deletingPost.value = false
+  }
 }
 
 async function submitReport(reason: string) {
@@ -464,6 +495,7 @@ onBeforeUnmount(() => {
                 <div v-if="postMenuOpen" class="rf-x-status-menu-panel">
                   <button type="button" @click="postMenuOpen = false; copyLink()">复制帖子链接</button>
                   <button v-if="!auth.user || auth.user.id !== post.author_id" type="button" class="danger" @click="openPostReport">举报帖子</button>
+                  <button v-if="canDeletePost" type="button" class="danger" :disabled="deletingPost" @click="removePost">删除帖子</button>
                   <button v-if="canPin" type="button" :disabled="pinning" @click="togglePin">{{ post.pinned ? '取消置顶' : '置顶帖子' }}</button>
                   <button v-if="canPin" type="button" class="danger" @click="openModeration">审核或删除</button>
                 </div>
@@ -479,7 +511,7 @@ onBeforeUnmount(() => {
           <PostTagList :tags="post.tags" class="rf-x-status-tags" />
           <h1 v-if="post.title">{{ post.title }}</h1>
           <MarkdownContent v-if="post.content" :source="post.content" class="rf-x-status-content" />
-          <PostMediaGrid v-if="post.media?.length" :media="post.media" custom-preview @open-preview="openImageViewer" />
+          <PostMediaGrid v-if="detachedPostMedia.length" :media="detachedPostMedia" custom-preview @open-preview="openDetachedImage" />
 
           <div class="rf-x-status-date">
             <time>{{ formatPostDate(post.created_at) }}</time><span>·</span><strong>{{ formatCount(post.views) }}</strong><span>次浏览</span>

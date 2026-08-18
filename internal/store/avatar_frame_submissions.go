@@ -36,13 +36,7 @@ func (s *Store) GetAvatarFrameUploadSettings(userID int64) (domain.AvatarFrameUp
 }
 
 func avatarFrameUploadAllowed(settings domain.AvatarFrameUploadSettings, context avatarFrameUserContext) bool {
-	if context.role == "admin" {
-		return true
-	}
-	if context.memberActive {
-		return settings.AllowMemberUpload
-	}
-	return settings.AllowRegularUpload
+	return context.role == "admin"
 }
 
 func (s *Store) UpdateAvatarFrameUploadSettings(actorID int64, allowRegular, allowMember bool) (domain.AvatarFrameUploadSettings, error) {
@@ -99,11 +93,11 @@ func scanAvatarFrameSubmission(scanner rowScanner) (domain.AvatarFrameSubmission
 }
 
 func (s *Store) CreateAvatarFrameSubmission(userID int64, name, description, imageURL string) (domain.AvatarFrameSubmission, error) {
-	canUpload, err := s.CanUploadAvatarFrame(userID)
+	context, err := avatarFrameContext(s.db, userID, false)
 	if err != nil {
 		return domain.AvatarFrameSubmission{}, err
 	}
-	if !canUpload {
+	if !avatarFrameUploadAllowed(domain.AvatarFrameUploadSettings{}, context) {
 		return domain.AvatarFrameSubmission{}, ErrAvatarFrameUploadForbidden
 	}
 	name, description, imageURL, err = normalizeAvatarFrameSubmission(name, description, imageURL)
@@ -111,12 +105,31 @@ func (s *Store) CreateAvatarFrameSubmission(userID int64, name, description, ima
 		return domain.AvatarFrameSubmission{}, err
 	}
 	now := time.Now().UTC()
-	result, err := s.db.Exec(`INSERT INTO avatar_frame_submissions (user_id, name, description, image_url, status, review_note, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', '', ?, ?)`, userID, name, description, imageURL, now, now)
+	tx, err := s.db.Begin()
 	if err != nil {
+		return domain.AvatarFrameSubmission{}, err
+	}
+	defer tx.Rollback()
+	frameResult, err := tx.Exec(`INSERT INTO avatar_frames (name, description, style, image_url, primary_color, secondary_color, price_cents, allowed_regular, allowed_member, allowed_admin, enabled, sort_order, sales_count, created_at, updated_at) VALUES (?, ?, 'image', ?, '#1d9bf0', '#8b5cf6', 0, 1, 1, 1, 1, 0, 0, ?, ?)`, name, description, imageURL, now, now)
+	if err != nil {
+		return domain.AvatarFrameSubmission{}, err
+	}
+	frameID, err := frameResult.LastInsertId()
+	if err != nil {
+		return domain.AvatarFrameSubmission{}, err
+	}
+	result, err := tx.Exec(`INSERT INTO avatar_frame_submissions (user_id, name, description, image_url, status, review_note, reviewed_by, reviewed_at, approved_frame_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'approved', '', ?, ?, ?, ?, ?)`, userID, name, description, imageURL, userID, now, frameID, now, now)
+	if err != nil {
+		return domain.AvatarFrameSubmission{}, err
+	}
+	if _, err := tx.Exec(`INSERT INTO moderation_actions (actor_id, target_type, target_id, action, reason, created_at) VALUES (?, 'avatar_frame', ?, 'admin_submission_approved', ?, ?)`, userID, frameID, name, now); err != nil {
 		return domain.AvatarFrameSubmission{}, err
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
+		return domain.AvatarFrameSubmission{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return domain.AvatarFrameSubmission{}, err
 	}
 	return s.avatarFrameSubmissionByID(s.db, id, false)

@@ -6,11 +6,23 @@ import { useTheme } from '@/theme'
 const props = withDefaults(defineProps<{
   source: string
   compact?: boolean
+  imageReplacements?: Record<string, string>
 }>(), {
   compact: false,
+  imageReplacements: () => ({}),
 })
 
-const html = computed(() => renderMarkdown(props.source, props.compact))
+const html = computed(() => {
+  const rendered = renderMarkdown(props.source, props.compact)
+  if (!rendered || !Object.keys(props.imageReplacements).length) return rendered
+  const template = document.createElement('template')
+  template.innerHTML = rendered
+  for (const image of template.content.querySelectorAll('img')) {
+    const replacement = props.imageReplacements[image.getAttribute('src') || '']
+    if (replacement) image.src = replacement
+  }
+  return template.innerHTML
+})
 const root = ref<HTMLElement>()
 const { theme } = useTheme()
 let enhancementVersion = 0

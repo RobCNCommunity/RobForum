@@ -1,29 +1,26 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { api, createRobloxMusicSubmission, fetchMyRobloxMusicSubmissions, fetchRobloxMusic, type RobloxMusic, type RobloxMusicSubmission } from '@/api'
+import { onMounted, ref } from 'vue'
+import { api, fetchMusicCategories, fetchRobloxMusic, type MusicCategory, type RobloxMusic } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 
 const query = ref('')
 const loading = ref(false)
-const submitting = ref(false)
 const errorMessage = ref('')
 const notice = ref('')
 const library = ref<RobloxMusic[]>([])
 const favorites = ref<RobloxMusic[]>([])
-const submissions = ref<RobloxMusicSubmission[]>([])
-const form = reactive({ asset_id: '', name: '', image_url: '' })
+const categories = ref<MusicCategory[]>([])
+const categoryID = ref(0)
 
 async function load(q = query.value.trim()) {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [music, favoriteResponse, ownSubmissions] = await Promise.all([
-      fetchRobloxMusic(q),
+    const [music, favoriteResponse] = await Promise.all([
+      fetchRobloxMusic(q, categoryID.value),
       api.get('/me/roblox/music'),
-      fetchMyRobloxMusicSubmissions(),
     ])
     favorites.value = favoriteResponse.data.data || []
-    submissions.value = ownSubmissions
     library.value = music.map((item) => ({ ...item, favorited: favorites.value.some((favorite) => favorite.asset_id === item.asset_id) }))
   } catch (error: any) {
     errorMessage.value = error?.response?.data?.error?.message || '音乐库加载失败'
@@ -33,6 +30,11 @@ async function load(q = query.value.trim()) {
 }
 
 async function search() { await load(query.value.trim()) }
+
+async function selectCategory(id: number) {
+  categoryID.value = id
+  await load()
+}
 
 async function toggleFavorite(item: RobloxMusic) {
   try {
@@ -61,49 +63,33 @@ async function share(item: RobloxMusic) {
   }
 }
 
-async function submit() {
-  const assetID = Number(form.asset_id.trim())
-  if (!Number.isSafeInteger(assetID) || assetID <= 0) { errorMessage.value = '请输入有效的 Roblox 音乐 ID'; return }
-  submitting.value = true
-  errorMessage.value = ''
-  notice.value = ''
-  try {
-    await createRobloxMusicSubmission({ asset_id: assetID, name: form.name.trim(), image_url: form.image_url.trim() })
-    Object.assign(form, { asset_id: '', name: '', image_url: '' })
-    notice.value = '投稿已提交，审核通过后会显示在音乐库中'
-    await load()
-  } catch (error: any) {
-    errorMessage.value = error?.response?.data?.error?.message || '投稿提交失败'
-  } finally {
-    submitting.value = false
-  }
-}
-
-function statusLabel(status: RobloxMusicSubmission['status']) {
-  return status === 'approved' ? '已通过' : status === 'rejected' ? '已驳回' : '审核中'
-}
-
 function applyAssetFromURL() {
   const asset = new URLSearchParams(window.location.search).get('asset')
   if (asset) { query.value = asset; void load(asset) }
 }
 
-onMounted(() => { void load().then(applyAssetFromURL) })
+onMounted(async () => {
+  try {
+    categories.value = await fetchMusicCategories()
+  } catch (error: any) {
+    errorMessage.value = error?.response?.data?.error?.message || '音乐分区加载失败'
+  }
+  await load()
+  applyAssetFromURL()
+})
 </script>
 
 <template>
   <section class="rf-page music-page">
     <header class="rf-page-header"><div class="rf-page-heading"><p class="rf-kicker">COMMUNITY ROBLOX AUDIO</p><h1>Roblox 音乐库</h1><p>浏览社区分享的 Roblox 音乐，收藏常用曲目并分享给队友。</p></div></header>
-    <form class="music-search" @submit.prevent="search"><AppIcon name="search" size="19" /><input v-model="query" autocomplete="off" placeholder="搜索音乐名称或 Roblox 音乐 ID" aria-label="搜索音乐名称或 Roblox 音乐 ID" /><button class="rf-primary-button" type="submit" :disabled="loading"><AppIcon name="search" size="16" />{{ loading ? '搜索中' : '搜索' }}</button></form>
+    <div class="music-toolbar"><form class="music-search" @submit.prevent="search"><AppIcon name="search" size="19" /><input v-model="query" autocomplete="off" placeholder="搜索音乐名称或 Roblox 音乐 ID" aria-label="搜索音乐名称或 Roblox 音乐 ID" /><button class="rf-primary-button" type="submit" :disabled="loading"><AppIcon name="search" size="16" />{{ loading ? '搜索中' : '搜索' }}</button></form><RouterLink to="/music/submit" class="rf-primary-button music-submit-link"><AppIcon name="upload" size="16" />投稿音乐</RouterLink></div>
+    <nav class="music-categories" aria-label="音乐分区"><button type="button" :class="{ active: categoryID === 0 }" @click="selectCategory(0)">全部</button><button v-for="category in categories" :key="category.id" type="button" :class="{ active: categoryID === category.id }" @click="selectCategory(category.id)">{{ category.name }}</button></nav>
     <p class="music-note"><AppIcon name="info" size="15" />音乐由社区投稿并经审核后展示，暂不支持试听。</p>
     <p v-if="errorMessage" class="music-error" role="alert">{{ errorMessage }}</p>
     <p v-if="notice" class="music-notice" role="status">{{ notice }}</p>
 
-    <section class="music-section library-section"><div class="section-title"><h2>{{ query.trim() ? '搜索结果' : '已审核音乐' }}</h2><span>{{ library.length }} 首</span></div><div v-if="library.length" class="music-grid"><article v-for="item in library" :key="item.asset_id" class="music-card"><div class="music-card-cover"><img v-if="item.thumbnail_url" :src="item.thumbnail_url" alt="" /><AppIcon v-else name="soundOn" size="34" /></div><div class="music-card-copy"><span class="music-id">ROBLOX ID {{ item.asset_id }}</span><h3>{{ item.name }}</h3><small>社区投稿 · 暂无试听</small></div><footer><button class="rf-icon-text-button" type="button" :aria-pressed="item.favorited" @click="toggleFavorite(item)"><AppIcon name="star" size="16" />{{ item.favorited ? '已收藏' : '收藏' }}</button><button class="rf-icon-text-button" type="button" @click="share(item)"><AppIcon name="share" size="16" />分享</button></footer></article></div><nut-empty v-else :description="query.trim() ? '没有匹配的已审核音乐' : '暂无已审核音乐，来提交第一首吧'" /></section>
+    <section class="music-section library-section"><div class="section-title"><h2>{{ query.trim() ? '搜索结果' : '全部音乐' }}</h2><span>{{ library.length }} 首</span></div><div v-if="library.length" class="music-grid"><article v-for="item in library" :key="item.asset_id" class="music-card"><div class="music-card-cover"><img v-if="item.thumbnail_url" :src="item.thumbnail_url" alt="" /><AppIcon v-else name="soundOn" size="34" /></div><div class="music-card-copy"><span class="music-id">ROBLOX ID {{ item.asset_id }}</span><div class="music-title-row"><h3>{{ item.name }}</h3><span class="music-category-tag">{{ item.category_name || '未分区' }}</span></div><small>社区投稿 · 暂无试听</small></div><footer><button class="rf-icon-text-button" type="button" :aria-pressed="item.favorited" @click="toggleFavorite(item)"><AppIcon name="star" size="16" />{{ item.favorited ? '已收藏' : '收藏' }}</button><button class="rf-icon-text-button" type="button" @click="share(item)"><AppIcon name="share" size="16" />分享</button></footer></article></div><nut-empty v-else :description="query.trim() ? '没有匹配的公开音乐' : '暂无公开音乐，来提交第一首吧'" /></section>
 
-    <section class="music-section submit-section"><div class="section-title"><div><h2>投稿音乐</h2><p>填写音乐 ID、名称和图片，审核通过后会公开展示。</p></div></div><form class="submission-form" @submit.prevent="submit"><label>Roblox 音乐 ID<input v-model.trim="form.asset_id" inputmode="numeric" placeholder="例如 1843529605" required /></label><label>音乐名称<input v-model.trim="form.name" maxlength="120" placeholder="给这首音乐起个名字" required /></label><label class="full">图片 URL<input v-model.trim="form.image_url" type="url" placeholder="https://..." required /></label><button class="rf-primary-button" type="submit" :disabled="submitting"><AppIcon name="upload" size="16" />{{ submitting ? '提交中' : '提交审核' }}</button></form></section>
-
-    <section class="music-section"><div class="section-title"><h2>我的投稿</h2><span>{{ submissions.length }} 条</span></div><div v-if="submissions.length" class="submission-list"><article v-for="item in submissions" :key="item.id"><div><strong>{{ item.name }}</strong><small>ID {{ item.asset_id }} · {{ new Date(item.created_at).toLocaleString() }}</small></div><span :class="['submission-status', item.status]">{{ statusLabel(item.status) }}</span><small v-if="item.review_note" class="review-note">{{ item.review_note }}</small></article></div><nut-empty v-else description="还没有投稿记录" /></section>
   </section>
 </template>
 
@@ -111,10 +97,15 @@ onMounted(() => { void load().then(applyAssetFromURL) })
 .music-page { padding-bottom: 48px; }
 .music-page .rf-page-header { padding-bottom: 16px; }
 .rf-kicker { margin: 0 0 5px; color: var(--primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
-.music-search { display: flex; align-items: center; gap: 10px; margin: 0 20px; padding: 8px 9px 8px 13px; border: 1px solid var(--rf-line); border-radius: 9px; background: var(--rf-bg-subtle); color: var(--rf-muted); }
+.music-toolbar { display: flex; align-items: center; gap: 10px; padding: 0 20px; }
+.music-search { display: flex; min-width: 0; flex: 1; align-items: center; gap: 10px; margin: 0; padding: 8px 9px 8px 13px; border: 1px solid var(--rf-line); border-radius: 9px; background: var(--rf-bg-subtle); color: var(--rf-muted); }
 .music-search:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent); }
 .music-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--rf-text); background: transparent; }
 .music-search .rf-primary-button { min-height: 36px; padding-inline: 13px; }
+.music-submit-link { min-height: 44px; flex: 0 0 auto; }
+.music-categories { display: flex; gap: 7px; padding: 12px 20px 2px; overflow-x: auto; }
+.music-categories button { flex: 0 0 auto; min-height: 30px; padding: 0 11px; border: 1px solid var(--rf-line); border-radius: 5px; color: var(--rf-muted); background: var(--rf-bg); font-size: 12px; }
+.music-categories button.active { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, transparent); font-weight: 700; }
 .music-note, .music-error, .music-notice { margin: 10px 20px; font-size: 12px; }
 .music-note { display: flex; align-items: center; gap: 6px; color: var(--rf-muted); }
 .music-error, .music-notice { padding: 10px 12px; }
@@ -131,20 +122,10 @@ onMounted(() => { void load().then(applyAssetFromURL) })
 .music-card-cover img { width: 100%; height: 100%; object-fit: cover; }
 .music-card-copy { min-width: 0; }
 .music-id { color: var(--primary); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
-.music-card h3 { margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.music-title-row { display: flex; min-width: 0; align-items: center; gap: 7px; margin: 4px 0; }
+.music-card h3 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.music-category-tag { flex: 0 0 auto; max-width: 86px; overflow: hidden; padding: 2px 6px; border-radius: 4px; color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .music-card-copy small { color: var(--rf-muted); font-size: 11px; }
 .music-card footer { display: flex; grid-column: 1 / -1; gap: 7px; }
-.submission-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 680px; }
-.submission-form label { display: flex; flex-direction: column; gap: 5px; color: var(--rf-muted); font-size: 12px; }
-.submission-form label.full { grid-column: 1 / -1; }
-.submission-form input { min-height: 38px; padding: 8px 10px; border: 1px solid var(--rf-line); border-radius: 6px; color: var(--rf-text); background: var(--rf-bg); }
-.submission-form button { justify-self: start; }
-.submission-list { border-top: 1px solid var(--rf-line); }
-.submission-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; padding: 12px 0; border-bottom: 1px solid var(--rf-line); }
-.submission-list article > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.submission-list small { color: var(--rf-muted); font-size: 11px; }
-.submission-status { align-self: start; font-size: 12px; font-weight: 700; }
-.submission-status.pending { color: var(--rf-muted); }.submission-status.approved { color: var(--rf-success); }.submission-status.rejected { color: var(--rf-danger); }
-.review-note { grid-column: 1 / -1; }
-@media (max-width: 650px) { .submission-form { grid-template-columns: 1fr; }.submission-form label.full { grid-column: auto; }.music-section { padding-inline: 14px; }.music-search { margin-inline: 14px; } }
+@media (max-width: 650px) { .music-page .rf-page-header { align-items: flex-start; flex-direction: column; }.music-toolbar { align-items: stretch; flex-direction: column; padding-inline: 14px; }.music-submit-link { min-width: 116px; min-height: 42px; align-self: flex-start; }.music-section { padding-inline: 14px; }.music-categories { padding-inline: 14px; } }
 </style>

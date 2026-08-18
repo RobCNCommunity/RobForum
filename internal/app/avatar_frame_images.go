@@ -25,16 +25,7 @@ var avatarFrameImageMIMEs = map[string]string{
 	".png":  "image/png",
 }
 
-func (s *Server) uploadAvatarFrameImage(w http.ResponseWriter, r *http.Request) {
-	canUpload, err := s.store.CanUploadAvatarFrame(currentUser(r).ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "avatar_frame_settings_failed", "头像框上传设置加载失败")
-		return
-	}
-	if !canUpload {
-		writeError(w, http.StatusForbidden, "avatar_frame_upload_forbidden", "当前账号暂未开放头像框上传")
-		return
-	}
+func (s *Server) uploadAdminAvatarFrameImage(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarFrameImageUpload+(1<<20))
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "avatar_frame_image_invalid", "头像框图片过大或表单格式无效")
@@ -92,16 +83,6 @@ func (s *Server) uploadAvatarFrameImage(w http.ResponseWriter, r *http.Request) 
 	if copyErr != nil || syncErr != nil || closeErr != nil || written == 0 || written > maxAvatarFrameImageUpload {
 		_ = os.Remove(targetPath)
 		writeError(w, http.StatusBadRequest, "avatar_frame_image_upload_failed", "头像框图片为空、过大或保存失败")
-		return
-	}
-	moderationBytes, moderationErr := moderationImageBytes(expectedMIME, imageBytes)
-	if moderationErr != nil {
-		_ = os.Remove(targetPath)
-		writeError(w, http.StatusBadRequest, "avatar_frame_image_invalid", "头像框图片无法解析")
-		return
-	}
-	if !s.approveImageBytes(w, r, "avatar_frame", moderationBytes) {
-		_ = os.Remove(targetPath)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"image_url": "/api/v1/media/avatar-frames/" + storedName})

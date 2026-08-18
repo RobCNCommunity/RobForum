@@ -69,6 +69,8 @@ export interface AvatarFrame {
   description: string
   style: 'ring' | 'double' | 'glow' | 'pixel' | 'halo' | 'image'
   image_url: string
+  image_offset_x: number
+  image_offset_y: number
   primary_color: string
   secondary_color: string
   price_cents: number
@@ -82,30 +84,6 @@ export interface AvatarFrame {
   equipped: boolean
   can_use: boolean
   purchased_at?: string
-  created_at: string
-  updated_at: string
-}
-
-export interface AvatarFrameUploadSettings {
-  allow_regular_upload: boolean
-  allow_member_upload: boolean
-  can_upload: boolean
-  updated_at: string
-}
-
-export interface AvatarFrameSubmission {
-  id: number
-  user_id: number
-  user_name: string
-  user_avatar: string
-  name: string
-  description: string
-  image_url: string
-  status: 'pending' | 'approved' | 'rejected'
-  review_note: string
-  reviewed_by?: number
-  reviewed_at?: string
-  approved_frame_id?: number
   created_at: string
   updated_at: string
 }
@@ -152,8 +130,9 @@ export interface LotteryWin { id: number; user_id: number; user_name?: string; a
 export interface LotteryDrawResult { won: boolean; prize?: LotteryPrize; win?: LotteryWin; points_charged: number; balance: number }
 export interface LotteryActivityStats { activity_id: number; activity_name: string; draw_count: number; unique_users: number; win_count: number; delivered_count: number; pending_count: number; points_spent: number; win_rate_bp: number }
 export interface PointsDashboard { account_count: number; total_balance: number; total_earned: number; total_spent: number; product_count: number; order_count: number; pending_orders: number; draw_count: number; win_count: number; pending_wins: number; activities: LotteryActivityStats[] }
-export interface RobloxMusic { asset_id: number; name: string; description?: string; creator_name?: string; thumbnail_url?: string; favorited: boolean; created_at?: string }
-export interface RobloxMusicSubmission { id: number; user_id: number; user_name: string; user_avatar?: string; asset_id: number; name: string; image_url: string; status: 'pending' | 'approved' | 'rejected'; review_note?: string; reviewed_by?: number; reviewed_at?: string; created_at: string; updated_at: string }
+export interface MusicCategory { id: number; name: string; sort_order: number; enabled: boolean; created_at: string; updated_at: string }
+export interface RobloxMusic { asset_id: number; name: string; description?: string; creator_name?: string; thumbnail_url?: string; category_id?: number; category_name?: string; favorited: boolean; created_at?: string }
+export interface RobloxMusicSubmission { id: number; user_id: number; user_name: string; user_avatar?: string; asset_id: number; name: string; image_url: string; category_id?: number; category_name?: string; status: 'pending' | 'approved' | 'rejected'; review_note?: string; reviewed_by?: number; reviewed_at?: string; created_at: string; updated_at: string }
 
 export interface Board { id: number; slug: string; name: string; description: string; icon: string; post_count: number }
 export interface PostMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
@@ -221,6 +200,7 @@ export interface Notice {
   title: string
   content: string
   link_url: string
+  media?: NoticeMedia[]
   level: string
   pinned: boolean
   enabled: boolean
@@ -228,6 +208,8 @@ export interface Notice {
   created_at: string
   updated_at: string
 }
+
+export interface NoticeMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
 
 export interface WalletEntry {
   id: number
@@ -264,14 +246,6 @@ export async function purchaseAvatarFrame(id: number) { return data<AvatarFrame>
 export async function equipAvatarFrame(frameId: number) { return data<{ avatar_frame: AvatarFrame | null }>(await api.put('/me/avatar-frame', { frame_id: frameId })) }
 export async function fetchAdminAvatarFrames() { return data<AvatarFrame[]>(await api.get('/admin/avatar-frames')) }
 export async function uploadAdminAvatarFrameImage(file: File) { const form = new FormData(); form.append('file', file); return data<{ image_url: string }>(await api.post('/admin/avatar-frames/image', form)) }
-export async function fetchAvatarFrameUploadSettings() { return data<AvatarFrameUploadSettings>(await api.get('/avatar-frame-upload-settings')) }
-export async function fetchAdminAvatarFrameUploadSettings() { return data<AvatarFrameUploadSettings>(await api.get('/admin/avatar-frame-upload-settings')) }
-export async function updateAdminAvatarFrameUploadSettings(input: Pick<AvatarFrameUploadSettings, 'allow_regular_upload' | 'allow_member_upload'>) { return data<AvatarFrameUploadSettings>(await api.put('/admin/avatar-frame-upload-settings', input)) }
-export async function uploadAvatarFrameSubmissionImage(file: File) { const form = new FormData(); form.append('file', file); return data<{ image_url: string }>(await api.post('/avatar-frames/image', form)) }
-export async function createAvatarFrameSubmission(input: { name: string; description: string; image_url: string }) { return data<AvatarFrameSubmission>(await api.post('/avatar-frame-submissions', input)) }
-export async function fetchMyAvatarFrameSubmissions() { return data<AvatarFrameSubmission[]>(await api.get('/me/avatar-frame-submissions')) }
-export async function fetchAdminAvatarFrameSubmissions(status = 'pending') { return data<AvatarFrameSubmission[]>(await api.get('/admin/avatar-frame-submissions', { params: { status } })) }
-export async function reviewAdminAvatarFrameSubmission(id: number, status: 'approved' | 'rejected', note = '') { return data<AvatarFrameSubmission>(await api.patch(`/admin/avatar-frame-submissions/${id}`, { status, note })) }
 export async function createAdminAvatarFrame(input: Omit<AvatarFrame, 'id' | 'sales_count' | 'owned' | 'equipped' | 'can_use' | 'purchased_at' | 'created_at' | 'updated_at'>) { return data<AvatarFrame>(await api.post('/admin/avatar-frames', input)) }
 export async function updateAdminAvatarFrame(id: number, input: Omit<AvatarFrame, 'id' | 'sales_count' | 'owned' | 'equipped' | 'can_use' | 'purchased_at' | 'created_at' | 'updated_at'>) { return data<AvatarFrame>(await api.put(`/admin/avatar-frames/${id}`, input)) }
 export async function deleteAdminAvatarFrame(id: number) { return data<{ disabled: boolean }>(await api.delete(`/admin/avatar-frames/${id}`)) }
@@ -355,6 +329,7 @@ export async function setUserBlocked(id: number, blocked: boolean) { return data
 export async function fetchFollowStatus(id: number) { return data<FollowStatus>(await api.get(`/users/${id}/follow`)) }
 export async function setUserFollowing(id: number, following: boolean) { return data<FollowStatus>(following ? await api.post(`/users/${id}/follow`) : await api.delete(`/users/${id}/follow`)) }
 export async function deleteComment(id: number) { return data<{ deleted: boolean }>(await api.delete(`/comments/${id}`)) }
+export async function deletePost(id: number) { return data<{ deleted: boolean }>(await api.delete(`/posts/${id}`)) }
 export async function fetchPostLike(id: number) { return data<LikeResult>(await api.get(`/posts/${id}/like`)) }
 export async function togglePostLike(id: number) { return data<LikeResult>(await api.post(`/posts/${id}/like`)) }
 export async function fetchCommentLike(id: number) { return data<LikeResult>(await api.get(`/comments/${id}/like`)) }
@@ -417,11 +392,16 @@ export async function deleteOAuth(id: number) { return data<{ deleted: boolean }
 export function resourceDownloadURL(id: number) { return `/api/v1/resources/${id}/download` }
 export function adminResourceDownloadURL(id: number) { return `/api/v1/admin/resources/${id}/download` }
 
-export async function fetchRobloxMusic(q = '') { return data<RobloxMusic[]>(await api.get('/roblox/music', { params: { q } })) }
-export async function createRobloxMusicSubmission(input: { asset_id: number; name: string; image_url: string }) { return data<RobloxMusicSubmission>(await api.post('/roblox/music/submissions', input)) }
+export async function fetchRobloxMusic(q = '', categoryId = 0) { return data<RobloxMusic[]>(await api.get('/roblox/music', { params: { q, category_id: categoryId || undefined } })) }
+export async function fetchMusicCategories() { return data<MusicCategory[]>(await api.get('/roblox/music/categories')) }
+export async function createRobloxMusicSubmission(input: { asset_id: number; name: string; image_url: string; category_id: number }) { return data<RobloxMusicSubmission>(await api.post('/roblox/music/submissions', input)) }
 export async function fetchMyRobloxMusicSubmissions() { return data<RobloxMusicSubmission[]>(await api.get('/me/roblox/music/submissions')) }
 export async function fetchAdminRobloxMusicSubmissions(status = 'pending') { return data<RobloxMusicSubmission[]>(await api.get('/admin/roblox/music', { params: { status } })) }
-export async function reviewAdminRobloxMusicSubmission(id: number, status: 'approved' | 'rejected', note = '') { return data<RobloxMusicSubmission>(await api.patch(`/admin/roblox/music/${id}`, { status, note })) }
+export async function reviewAdminRobloxMusicSubmission(id: number, status: 'approved' | 'rejected', note = '', categoryId = 0) { return data<RobloxMusicSubmission>(await api.patch(`/admin/roblox/music/${id}`, { status, note, category_id: categoryId })) }
+export async function fetchAdminMusicCategories() { return data<MusicCategory[]>(await api.get('/admin/roblox/music/categories')) }
+export async function createAdminMusicCategory(input: { name: string; sort_order: number; enabled: boolean }) { return data<MusicCategory>(await api.post('/admin/roblox/music/categories', input)) }
+export async function updateAdminMusicCategory(id: number, input: { name: string; sort_order: number; enabled: boolean }) { return data<MusicCategory>(await api.put(`/admin/roblox/music/categories/${id}`, input)) }
+export async function deleteAdminMusicCategory(id: number) { return data<{ deleted: boolean }>(await api.delete(`/admin/roblox/music/categories/${id}`)) }
 
 
 export async function fetchAds() { return data<AdSlot[]>(await api.get('/ads')) }
@@ -431,8 +411,9 @@ export async function updateAdminAd(id: number, input: { title?: string; image_u
 export async function deleteAdminAd(id: number) { return data<{ deleted: boolean }>(await api.delete('/admin/ads/' + id)) }
 export async function fetchNotices() { return data<Notice[]>(await api.get('/notices')) }
 export async function fetchAdminNotices() { return data<Notice[]>(await api.get('/admin/notices')) }
-export async function createAdminNotice(input: { title: string; content: string; link_url?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.post('/admin/notices', input)) }
-export async function updateAdminNotice(id: number, input: { title?: string; content?: string; link_url?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.put('/admin/notices/' + id, input)) }
+export async function uploadAdminNoticeImage(file: File) { const form = new FormData(); form.append('file', file); return data<NoticeMedia>(await api.post('/admin/notices/media', form)) }
+export async function createAdminNotice(input: { title: string; content: string; media?: NoticeMedia[]; link_url?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.post('/admin/notices', input)) }
+export async function updateAdminNotice(id: number, input: { title?: string; content?: string; media?: NoticeMedia[]; link_url?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.put('/admin/notices/' + id, input)) }
 export async function deleteAdminNotice(id: number) { return data<{ deleted: boolean }>(await api.delete('/admin/notices/' + id)) }
 export async function pinPost(id: number, pinned: boolean) { return data<Post>(await api.patch('/admin/posts/' + id + '/pin', { pinned })) }
 export async function fetchWallet() { return data<WalletSummary>(await api.get('/me/wallet')) }

@@ -293,12 +293,24 @@ CREATE TABLE IF NOT EXISTS roblox_music_favorites (
   CONSTRAINT fk_roblox_music_favorites_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS music_categories (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(40) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_music_categories_name (name),
+  INDEX idx_music_categories_enabled_sort (enabled, sort_order, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS roblox_music_submissions (
   id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT NOT NULL,
   asset_id BIGINT NOT NULL,
   name VARCHAR(120) NOT NULL,
   image_url VARCHAR(500) NOT NULL,
+  category_id BIGINT NULL,
   status VARCHAR(16) NOT NULL DEFAULT 'pending',
   review_note VARCHAR(500) NOT NULL DEFAULT '',
   reviewed_by BIGINT NULL,
@@ -308,8 +320,10 @@ CREATE TABLE IF NOT EXISTS roblox_music_submissions (
   UNIQUE KEY uq_roblox_music_submissions_asset (asset_id),
   INDEX idx_roblox_music_submissions_status_created (status, created_at, id),
   INDEX idx_roblox_music_submissions_user_created (user_id, created_at, id),
+  INDEX idx_roblox_music_submissions_category_status (category_id, status, created_at),
   CONSTRAINT fk_roblox_music_submissions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  CONSTRAINT fk_roblox_music_submissions_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+  CONSTRAINT fk_roblox_music_submissions_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_roblox_music_submissions_category FOREIGN KEY (category_id) REFERENCES music_categories(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -504,6 +518,8 @@ CREATE TABLE IF NOT EXISTS avatar_frames (
   description VARCHAR(240) NOT NULL DEFAULT '',
   style VARCHAR(24) NOT NULL DEFAULT 'ring',
   image_url VARCHAR(500) NOT NULL DEFAULT '',
+  image_offset_x INT NOT NULL DEFAULT 0,
+  image_offset_y INT NOT NULL DEFAULT 0,
   primary_color VARCHAR(16) NOT NULL DEFAULT '#1d9bf0',
   secondary_color VARCHAR(16) NOT NULL DEFAULT '#8b5cf6',
   price_cents BIGINT NOT NULL DEFAULT 0,
@@ -642,6 +658,7 @@ CREATE TABLE IF NOT EXISTS notices (
   title VARCHAR(160) NOT NULL,
   content MEDIUMTEXT NOT NULL,
   link_url VARCHAR(500) NOT NULL DEFAULT '',
+  media_json VARCHAR(16000) NOT NULL DEFAULT '[]',
   level VARCHAR(16) NOT NULL DEFAULT 'info',
   pinned TINYINT(1) NOT NULL DEFAULT 0,
   enabled TINYINT(1) NOT NULL DEFAULT 1,

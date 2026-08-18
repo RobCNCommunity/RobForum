@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+
+	"roblox-community/internal/store"
 )
 
 func multipartImageHeader(t *testing.T, filename string, content []byte) *multipart.FileHeader {
@@ -209,5 +212,24 @@ func TestLocalPostMediaName(t *testing.T) {
 		if got := localPostMediaName(value); got != "" {
 			t.Fatalf("unsafe media path accepted: %q", value)
 		}
+	}
+}
+
+func TestResolvePostMediaPlaceholders(t *testing.T) {
+	content, err := resolvePostMediaPlaceholders("第一段\n\n![步骤图](robforum-upload://media/0)\n\n第二段", []store.PostMediaInput{{
+		StoredName: "0123456789abcdef.png",
+		MIMEType:   "image/png",
+	}})
+	if err != nil {
+		t.Fatalf("valid inline image rejected: %v", err)
+	}
+	if !strings.Contains(content, "![步骤图](/api/v1/media/posts/0123456789abcdef.png)") {
+		t.Fatalf("placeholder was not resolved: %q", content)
+	}
+}
+
+func TestResolvePostMediaPlaceholdersRejectsMissingUpload(t *testing.T) {
+	if _, err := resolvePostMediaPlaceholders("![缺失图片](robforum-upload://media/1)", nil); err == nil {
+		t.Fatal("missing inline upload was accepted")
 	}
 }

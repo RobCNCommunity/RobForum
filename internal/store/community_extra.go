@@ -1,8 +1,10 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -178,11 +180,15 @@ func (s *Store) DeleteAd(actorID, id int64) error {
 	return tx.Commit()
 }
 
+const maxNoticeMediaCount = 4
+
+var noticeMediaURLPattern = regexp.MustCompile(`^/api/v1/media/news/[0-9a-f]{32,40}\.(png|jpe?g)$`)
+
 func (s *Store) ListPublicNotices(limit int) ([]domain.Notice, error) {
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	rows, err := s.db.Query(`SELECT id, title, content, link_url, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE enabled = 1 ORDER BY pinned DESC, updated_at DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT id, title, content, link_url, media_json, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE enabled = 1 ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +205,7 @@ func (s *Store) ListPublicNotices(limit int) ([]domain.Notice, error) {
 }
 
 func (s *Store) ListAdminNotices() ([]domain.Notice, error) {
-	rows, err := s.db.Query(`SELECT id, title, content, link_url, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices ORDER BY pinned DESC, updated_at DESC`)
+	rows, err := s.db.Query(`SELECT id, title, content, link_url, media_json, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices ORDER BY pinned DESC, updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -218,13 +224,47 @@ func (s *Store) ListAdminNotices() ([]domain.Notice, error) {
 func scanNotice(row adScanner) (domain.Notice, error) {
 	var item domain.Notice
 	var pinned, enabled int
-	err := row.Scan(&item.ID, &item.Title, &item.Content, &item.LinkURL, &item.Level, &pinned, &enabled, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	var mediaJSON string
+	err := row.Scan(&item.ID, &item.Title, &item.Content, &item.LinkURL, &mediaJSON, &item.Level, &pinned, &enabled, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	if err == nil && strings.TrimSpace(mediaJSON) != "" {
+		if decodeErr := json.Unmarshal([]byte(mediaJSON), &item.Media); decodeErr != nil {
+			return domain.Notice{}, decodeErr
+		}
+	}
 	item.Pinned = pinned != 0
 	item.Enabled = enabled != 0
 	return item, err
 }
 
-func (s *Store) CreateNotice(userID int64, title, content, linkURL, level string, pinned, enabled bool) (domain.Notice, error) {
+func normalizeNoticeMedia(media []domain.NoticeMedia) ([]domain.NoticeMedia, string, error) {
+	if len(media) > maxNoticeMediaCount {
+		return nil, "", errors.New("新闻最多上传 4 张图片")
+	}
+	seen := make(map[string]struct{}, len(media))
+	for index := range media {
+		item := &media[index]
+		item.URL = strings.TrimSpace(item.URL)
+		item.MIMEType = strings.ToLower(strings.TrimSpace(item.MIMEType))
+		if !noticeMediaURLPattern.MatchString(item.URL) || item.MIMEType != "image/png" && item.MIMEType != "image/jpeg" || item.Width < 16 || item.Height < 16 || item.SizeBytes < 1 {
+			return nil, "", errors.New("新闻图片链接无效")
+		}
+		if _, ok := seen[item.URL]; ok {
+			return nil, "", errors.New("新闻图片不能重复")
+		}
+		seen[item.URL] = struct{}{}
+		item.ID = 0
+	}
+	if media == nil {
+		media = []domain.NoticeMedia{}
+	}
+	encoded, err := json.Marshal(media)
+	if err != nil {
+		return nil, "", err
+	}
+	return media, string(encoded), nil
+}
+
+func (s *Store) CreateNotice(userID int64, title, content, linkURL, level string, pinned, enabled bool, media []domain.NoticeMedia) (domain.Notice, error) {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
 	linkURL = strings.TrimSpace(linkURL)
@@ -244,6 +284,10 @@ func (s *Store) CreateNotice(userID int64, title, content, linkURL, level string
 	if level != "info" && level != "success" && level != "warning" && level != "error" {
 		return domain.Notice{}, errors.New("公告级别无效")
 	}
+	media, mediaJSON, err := normalizeNoticeMedia(media)
+	if err != nil {
+		return domain.Notice{}, err
+	}
 	now := time.Now().UTC()
 	p, e := 0, 0
 	if pinned {
@@ -257,7 +301,7 @@ func (s *Store) CreateNotice(userID int64, title, content, linkURL, level string
 		return domain.Notice{}, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO notices (title, content, link_url, level, pinned, enabled, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, title, content, linkURL, level, p, e, userID, now, now)
+	res, err := tx.Exec(`INSERT INTO notices (title, content, link_url, media_json, level, pinned, enabled, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, title, content, linkURL, mediaJSON, level, p, e, userID, now, now)
 	if err != nil {
 		return domain.Notice{}, err
 	}
@@ -283,11 +327,11 @@ func (s *Store) GetNotice(id int64) (domain.Notice, error) {
 }
 
 func getNotice(queryer rowQueryer, id int64) (domain.Notice, error) {
-	row := queryer.QueryRow(`SELECT id, title, content, link_url, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE id = ?`, id)
+	row := queryer.QueryRow(`SELECT id, title, content, link_url, media_json, level, pinned, enabled, COALESCE(created_by, 0), created_at, updated_at FROM notices WHERE id = ?`, id)
 	return scanNotice(row)
 }
 
-func (s *Store) UpdateNotice(actorID, id int64, title, content, linkURL, level string, pinned, enabled bool) (domain.Notice, error) {
+func (s *Store) UpdateNotice(actorID, id int64, title, content, linkURL, level string, pinned, enabled bool, media []domain.NoticeMedia) (domain.Notice, error) {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
 	linkURL = strings.TrimSpace(linkURL)
@@ -307,6 +351,10 @@ func (s *Store) UpdateNotice(actorID, id int64, title, content, linkURL, level s
 	if level != "info" && level != "success" && level != "warning" && level != "error" {
 		return domain.Notice{}, errors.New("公告级别无效")
 	}
+	media, mediaJSON, err := normalizeNoticeMedia(media)
+	if err != nil {
+		return domain.Notice{}, err
+	}
 	p, e := 0, 0
 	if pinned {
 		p = 1
@@ -320,7 +368,7 @@ func (s *Store) UpdateNotice(actorID, id int64, title, content, linkURL, level s
 		return domain.Notice{}, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE notices SET title = ?, content = ?, link_url = ?, level = ?, pinned = ?, enabled = ?, updated_at = ? WHERE id = ?`, title, content, linkURL, level, p, e, now, id)
+	res, err := tx.Exec(`UPDATE notices SET title = ?, content = ?, link_url = ?, media_json = ?, level = ?, pinned = ?, enabled = ?, updated_at = ? WHERE id = ?`, title, content, linkURL, mediaJSON, level, p, e, now, id)
 	if err != nil {
 		return domain.Notice{}, err
 	}

@@ -344,7 +344,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .rf-switch-row input:checked + .rf-toggle::after { transform: translateX(18px); }
 .rf-switch-row input:focus-visible + .rf-toggle { outline: 2px solid var(--primary); outline-offset: 3px; }
 
-.rf-primary-button, .rf-secondary-button, .rf-danger-button, .rf-icon-text-button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 17px; border-radius: var(--rf-pill); font-weight: 700; transition: background .16s var(--ease), color .16s var(--ease), transform .1s var(--ease); }
+.rf-primary-button, .rf-secondary-button, .rf-danger-button, .rf-icon-text-button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 17px; border-radius: var(--rf-pill); font-weight: 700; white-space: nowrap; transition: background .16s var(--ease), color .16s var(--ease), transform .1s var(--ease); }
 .rf-secondary-button { border: 1px solid var(--rf-line); color: var(--rf-text); background: var(--rf-bg); }
 .rf-secondary-button:hover, .rf-icon-text-button:hover { background: var(--rf-bg-hover); }
 .rf-danger-button { border: 1px solid color-mix(in srgb, var(--rf-danger) 35%, var(--rf-line)); color: var(--rf-danger); background: transparent; }
@@ -479,7 +479,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 @media (max-width: 560px) {
   body { font-size: 15px; }
-  .rf-page-heading h1 { font-size: 24px; }
+  .rf-page-heading { min-width: 0; }
+  .rf-page-heading h1 { font-size: 24px; overflow-wrap: anywhere; }
   .rf-page-header { gap: 8px; }
   .rf-page-extra .rf-primary-button { min-height: 36px; padding: 0 14px; }
   .auth-page { padding: 68px 18px 24px; align-items: start; }
@@ -499,13 +500,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .rf-admin-list { margin-inline: -12px; }
   .rf-admin-list-row { flex-wrap: wrap; padding-inline: 12px; }
   .rf-admin-list-row > .rf-row-actions { flex: 0 0 100%; }
+  .rf-panel-heading h3, .rf-panel-heading p, .rf-inline-note strong, .rf-inline-note span, .rf-admin-list-copy small { overflow-wrap: anywhere; }
   .rf-panel-heading h3 { font-size: 17px; }
   .rf-inline-note { margin-inline: 12px; }
   .rf-form-actions { width: 100%; align-items: stretch; }
   .rf-form-actions > *, .rf-form-actions .nut-button, .rf-form-actions .rf-primary-button { width: 100%; min-height: 44px; }
   .rf-row-actions, .rf-data-row > div.rf-row-actions { display: flex; width: 100%; flex-wrap: wrap; }
   .rf-row-actions > * { min-width: 0; max-width: 100%; }
-  .rf-row-actions > :is(button, a, .nut-button) { width: auto; min-width: 44px; min-height: 44px; }
+  .rf-row-actions > :is(button, a, .nut-button) { width: auto; min-width: 72px; min-height: 44px; padding-inline: 16px; white-space: nowrap; }
   .rf-button-small { min-height: 44px; padding-inline: 14px; }
   .rf-icon-button { width: 44px; height: 44px; }
   .rf-test-row { grid-template-columns: 1fr; }
