@@ -182,7 +182,7 @@ func (s *Store) migrate() error {
 		{table: "notifications", name: "conversation_id", def: "BIGINT NULL"},
 		{table: "comments", name: "parent_id", def: "BIGINT NULL"},
 		{table: "notices", name: "link_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
-		{table: "notices", name: "media_json", def: "VARCHAR(16000) NOT NULL DEFAULT '[]'"},
+		{table: "notices", name: "media_json", def: "MEDIUMTEXT NOT NULL DEFAULT ('[]')"},
 		{table: "roblox_music_submissions", name: "category_id", def: "BIGINT NULL"},
 		{table: "avatar_frames", name: "image_url", def: "VARCHAR(500) NOT NULL DEFAULT ''"},
 		{table: "avatar_frames", name: "image_offset_x", def: "INT NOT NULL DEFAULT 0"},

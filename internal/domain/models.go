@@ -592,6 +592,27 @@ type NoticeMedia struct {
 	SizeBytes int64  `json:"size_bytes"`
 }
 
+type RobloxNews struct {
+	ID        int64            `json:"id"`
+	Title     string           `json:"title"`
+	Content   string           `json:"content"`
+	LinkURL   string           `json:"link_url"`
+	Media     []RobloxNewsMedia `json:"media,omitempty"`
+	Enabled   bool             `json:"enabled"`
+	CreatedBy int64            `json:"created_by,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
+}
+
+type RobloxNewsMedia struct {
+	ID        int64  `json:"id"`
+	URL       string `json:"url"`
+	MIMEType  string `json:"mime_type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
 type Badge struct {
 	ID          int64     `json:"id"`
 	Slug        string    `json:"slug"`

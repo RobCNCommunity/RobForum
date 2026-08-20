@@ -520,5 +520,16 @@ func (s *Store) EnsureCommunitySeeds() error {
 			return err
 		}
 	}
+	var robloxNewsCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM roblox_news`).Scan(&robloxNewsCount); err != nil {
+		return err
+	}
+	if robloxNewsCount == 0 {
+		_, err := s.db.Exec(`INSERT INTO roblox_news (title, content, enabled, created_by, created_at, updated_at) VALUES (?, ?, 1, NULL, ?, ?)`,
+			"欢迎来到新闻快报", "这里会发布 Roblox 平台动态、版本更新与官方活动消息。", now, now)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }

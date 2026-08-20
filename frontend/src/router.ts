@@ -5,7 +5,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: () => import('./views/HomeView.vue'), meta: { title: '社区首页' } },
-    { path: '/news', component: () => import('./views/NewsView.vue'), meta: { title: '新闻快报' } },
+    { path: '/news/:id', component: () => import('./views/NewsDetailView.vue'), meta: { title: '新闻详情' } },
+    { path: '/announcements', component: () => import('./views/AnnouncementsView.vue'), meta: { title: '社区公告' } },
     { path: '/download', component: () => import('./views/DownloadView.vue'), meta: { title: '客户端下载' } },
     { path: '/boards/:slug', component: () => import('./views/HomeView.vue'), meta: { title: '社区板块' } },
     { path: '/posts/:id', component: () => import('./views/PostView.vue'), meta: { title: '帖子详情' } },
@@ -38,6 +39,7 @@ const router = createRouter({
     { path: '/forgot-password', component: () => import('./views/ForgotPasswordView.vue'), meta: { public: true, title: '找回密码' } },
     { path: '/reset-password', component: () => import('./views/ResetPasswordView.vue'), meta: { public: true, title: '重置密码' } },
     { path: '/admin/ads', component: () => import('./views/AdminAdsView.vue'), meta: { admin: true, title: '广告管理' } },
+    { path: '/admin/roblox-news', component: () => import('./views/AdminRobloxNewsView.vue'), meta: { admin: true, title: '新闻管理' } },
     { path: '/admin/notices', component: () => import('./views/AdminNoticesView.vue'), meta: { admin: true, title: '公告管理' } },
     { path: '/admin/music-categories', component: () => import('./views/AdminMusicCategoriesView.vue'), meta: { admin: true, title: '音乐分区管理' } },
     { path: '/admin/settings', component: () => import('./views/AdminSettingsView.vue'), meta: { admin: true, title: '系统设置' } },

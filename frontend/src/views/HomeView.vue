@@ -10,16 +10,21 @@ import {
   fetchNotices,
   fetchPostsPage,
   fetchRecommendedPostsPage,
+  fetchRobloxNews,
   type AdSlot,
   type Board,
   type Notice,
   type Post,
+  type PostMedia,
+  type RobloxNews,
 } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import FeedPostThread from '@/components/FeedPostThread.vue'
 import PageContainer from '@/components/PageContainer.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
+import PostMediaGrid from '@/components/PostMediaGrid.vue'
 import { markdownToPlainText } from '@/lib/markdown'
 
 const route = useRoute()
@@ -29,6 +34,7 @@ const boards = ref<Board[]>([])
 const posts = ref<Post[]>([])
 const ads = ref<AdSlot[]>([])
 const notices = ref<Notice[]>([])
+const newsItems = ref<RobloxNews[]>([])
 const loading = ref(true)
 const loadingMore = ref(false)
 const nextOffset = ref(0)
@@ -36,7 +42,7 @@ const hasMore = ref(true)
 const error = ref('')
 const search = ref('')
 const noticeOpen = ref(false)
-const feedMode = ref<'for-you' | 'following'>('for-you')
+const feedMode = ref<'for-you' | 'following' | 'news'>('for-you')
 const activeAdIndex = ref(0)
 const carouselPaused = ref(false)
 let adTimer: number | undefined
@@ -46,11 +52,13 @@ const activeBoard = computed(() => boards.value.find((item) => item.slug === Str
 const pageTitle = computed(() => activeBoard.value?.name || (route.params.slug ? '板块内容' : '首页'))
 const isHome = computed(() => !route.params.slug)
 const viewingFollowing = computed(() => isHome.value && feedMode.value === 'following')
+const isNewsMode = computed(() => isHome.value && feedMode.value === 'news')
 const requiresLoginForFeed = computed(() => viewingFollowing.value && !auth.user)
 const activeAd = computed(() => ads.value[activeAdIndex.value] || null)
 const pinnedPosts = computed(() => posts.value.filter((post) => post.pinned))
 const normalPosts = computed(() => posts.value.filter((post) => !post.pinned))
 const feedLabel = computed(() => {
+  if (isNewsMode.value) return '新闻快报'
   if (requiresLoginForFeed.value) return '正在关注'
   if (route.params.slug) return `${pageTitle.value}的帖子`
   return viewingFollowing.value ? '正在关注' : '为你推荐'
@@ -74,13 +82,20 @@ async function load() {
   try {
     const tasks: Promise<unknown>[] = [
       fetchBoards().then((value) => { if (requestVersion === feedRequestVersion) boards.value = value }),
-      fetchFeedPage(0).then((page) => {
+    ]
+
+    if (isNewsMode.value) {
+      tasks.push(fetchRobloxNews().then((value) => {
+        if (requestVersion === feedRequestVersion) newsItems.value = value
+      }))
+    } else {
+      tasks.push(fetchFeedPage(0).then((page) => {
         if (requestVersion !== feedRequestVersion) return
         posts.value = page.items
         nextOffset.value = page.next_offset
         hasMore.value = page.has_more
-      }),
-    ]
+      }))
+    }
 
     if (isHome.value) {
       tasks.push(fetchAds().then((value) => { if (requestVersion === feedRequestVersion) ads.value = value }))
@@ -159,6 +174,10 @@ function startAdTimer() {
   }, 4500)
 }
 
+function mediaForNews(item: RobloxNews): PostMedia[] {
+  return (item.media || []).map((image, index) => ({ id: image.id || index + 1, url: image.url, mime_type: image.mime_type, width: image.width, height: image.height, size_bytes: image.size_bytes }))
+}
+
 function formatDate(value: string) {
   try {
     return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(new Date(value))
@@ -212,7 +231,7 @@ onBeforeUnmount(stopAdTimer)
       <nav v-if="isHome" class="rf-feed-tabs" aria-label="首页内容导航">
         <button type="button" :class="{ active: feedMode === 'for-you' }" @click="feedMode = 'for-you'">为你推荐</button>
         <button type="button" :class="{ active: feedMode === 'following' }" @click="feedMode = 'following'">正在关注</button>
-        <RouterLink to="/news"><AppIcon name="announcement" size="16" />新闻快报</RouterLink>
+        <button type="button" :class="{ active: feedMode === 'news' }" @click="feedMode = 'news'"><AppIcon name="flame" size="16" />新闻快报</button>
       </nav>
     </div>
 
@@ -275,60 +294,92 @@ onBeforeUnmount(stopAdTimer)
       <button type="button" @click="load">重试</button>
     </div>
 
-    <section v-if="pinnedPosts.length && !requiresLoginForFeed" class="rf-pinned">
-      <div class="rf-section-label"><span>置顶帖子</span><AppIcon name="notice" size="16" /></div>
-      <RouterLink v-for="post in pinnedPosts" :key="`p-${post.id}`" :to="`/posts/${post.id}`" class="rf-pinned-row">
-        <span class="rf-pin-label">置顶</span>
-        <strong>{{ post.title || excerpt(post.content) }}</strong>
-        <small>{{ post.board_name }}</small>
-      </RouterLink>
-    </section>
-
-    <div class="rf-section-label rf-feed-label">
-      <span>{{ feedLabel }}</span>
-      <small v-if="!loading && !requiresLoginForFeed">{{ posts.length }} 条</small>
-    </div>
-
-    <section v-if="requiresLoginForFeed" class="rf-feed-gate">
-      <div class="rf-feed-gate-mark"><AppIcon name="people" size="23" /></div>
-      <h2>看看你关注的人</h2>
-      <p>登录后，关注的创作者和玩家的最新动态会出现在这里。</p>
-      <RouterLink to="/login" class="rf-primary-button">登录查看</RouterLink>
-    </section>
-
-    <div v-else-if="loading" class="rf-feed-loading" aria-label="正在加载动态">
-      <nut-skeleton v-for="n in 4" :key="n" animated avatar title row="2" height="14px" />
-    </div>
-
-    <InfiniteLoading
-      v-else
-      class="rf-feed-infinite"
-      :has-more="hasMore"
-      :is-open-refresh="true"
-      :threshold="260"
-      pull-icon="refresh"
-      load-icon="loading"
-      pull-txt="下拉刷新"
-      load-txt="正在加载更多内容"
-      load-more-txt="已经看到这里了"
-      @load-more="loadMore"
-      @refresh="refreshFeed"
-    >
-      <section class="rf-timeline">
-        <FeedPostThread v-for="post in normalPosts" :key="post.id" :post="post" />
-
-        <div v-if="!normalPosts.length" class="rf-empty">
-          <nut-empty description="这里还没有内容" />
-          <span>成为第一个分享想法的人吧。</span>
-          <nut-button v-if="auth.user" type="primary" @click="router.push('/posts/new')">发布第一篇帖子</nut-button>
+    <template v-if="isNewsMode">
+      <div class="rf-section-label rf-feed-label"><span>最新资讯</span><small v-if="!loading">{{ newsItems.length }} 条</small></div>
+      <div v-if="loading" class="rf-feed-loading" aria-label="正在加载新闻">
+        <nut-skeleton v-for="n in 5" :key="n" animated avatar title row="2" height="14px" />
+      </div>
+      <section v-else class="rf-news-list">
+        <div v-if="!newsItems.length" class="rf-empty">
+          <nut-empty description="暂无新闻" />
         </div>
+        <RouterLink
+          v-for="item in newsItems"
+          :key="item.id"
+          :to="`/news/${item.id}`"
+          class="rf-news-row"
+        >
+          <div class="rf-news-thumb">
+            <img v-if="item.media?.length" :src="item.media[0].url" :alt="item.title" loading="lazy" />
+            <div v-else class="rf-news-thumb-placeholder"><AppIcon name="flame" size="24" /></div>
+          </div>
+          <div class="rf-news-body">
+            <h3>{{ item.title }}</h3>
+            <div class="rf-news-row-meta">
+              <span>{{ formatDate(item.updated_at || item.created_at) }}</span>
+              <span v-if="item.link_url">阅读原文</span>
+            </div>
+          </div>
+        </RouterLink>
       </section>
-      <template #loading><div class="rf-feed-more"><span class="rf-inline-spinner" aria-hidden="true" />加载下一批 30 条内容</div></template>
-      <template #finished><div v-if="normalPosts.length" class="rf-feed-finished">没有更多内容了</div></template>
-    </InfiniteLoading>
+    </template>
+
+    <template v-else>
+      <section v-if="pinnedPosts.length && !requiresLoginForFeed" class="rf-pinned">
+        <div class="rf-section-label"><span>置顶帖子</span><AppIcon name="notice" size="16" /></div>
+        <RouterLink v-for="post in pinnedPosts" :key="`p-${post.id}`" :to="`/posts/${post.id}`" class="rf-pinned-row">
+          <span class="rf-pin-label">置顶</span>
+          <strong>{{ post.title || excerpt(post.content) }}</strong>
+          <small>{{ post.board_name }}</small>
+        </RouterLink>
+      </section>
+
+      <div class="rf-section-label rf-feed-label">
+        <span>{{ feedLabel }}</span>
+        <small v-if="!loading && !requiresLoginForFeed">{{ posts.length }} 条</small>
+      </div>
+
+      <section v-if="requiresLoginForFeed" class="rf-feed-gate">
+        <div class="rf-feed-gate-mark"><AppIcon name="people" size="23" /></div>
+        <h2>看看你关注的人</h2>
+        <p>登录后，关注的创作者和玩家的最新动态会出现在这里。</p>
+        <RouterLink to="/login" class="rf-primary-button">登录查看</RouterLink>
+      </section>
+
+      <div v-else-if="loading" class="rf-feed-loading" aria-label="正在加载动态">
+        <nut-skeleton v-for="n in 4" :key="n" animated avatar title row="2" height="14px" />
+      </div>
+
+      <InfiniteLoading
+        v-else
+        class="rf-feed-infinite"
+        :has-more="hasMore"
+        :is-open-refresh="true"
+        :threshold="260"
+        pull-icon="refresh"
+        load-icon="loading"
+        pull-txt="下拉刷新"
+        load-txt="正在加载更多内容"
+        load-more-txt="已经看到这里了"
+        @load-more="loadMore"
+        @refresh="refreshFeed"
+      >
+        <section class="rf-timeline">
+          <FeedPostThread v-for="post in normalPosts" :key="post.id" :post="post" />
+
+          <div v-if="!normalPosts.length" class="rf-empty">
+            <nut-empty description="这里还没有内容" />
+            <span>成为第一个分享想法的人吧。</span>
+            <nut-button v-if="auth.user" type="primary" @click="router.push('/posts/new')">发布第一篇帖子</nut-button>
+          </div>
+        </section>
+        <template #loading><div class="rf-feed-more"><span class="rf-inline-spinner" aria-hidden="true" />加载下一批 30 条内容</div></template>
+        <template #finished><div v-if="normalPosts.length" class="rf-feed-finished">没有更多内容了</div></template>
+      </InfiniteLoading>
+    </template>
 
     <nut-popup v-model:visible="noticeOpen" position="right" :style="{ width: 'min(420px, 100vw)', height: '100%' }" closeable round>
-      <section class="rf-notice-sheet"><header><h2>社区公告</h2></header><div v-if="!notices.length" class="rf-empty">暂无公告</div><article v-for="item in notices" :key="item.id"><div><b v-if="item.pinned">置顶</b><strong>{{ item.title }}</strong></div><p>{{ item.content }}</p><footer><time>{{ formatDate(item.updated_at || item.created_at) }}</time><a v-if="item.link_url" :href="item.link_url" target="_blank" rel="noopener noreferrer">查看详情<AppIcon name="arrow" size="14" /></a></footer></article></section>
+      <section class="rf-notice-sheet"><header><h2>社区公告</h2><RouterLink to="/announcements" @click="noticeOpen = false">查看全部<AppIcon name="arrow" size="14" /></RouterLink></header><div v-if="!notices.length" class="rf-empty">暂无公告</div><article v-for="item in notices" :key="item.id"><div><b v-if="item.pinned">置顶</b><strong>{{ item.title }}</strong></div><p>{{ item.content }}</p><footer><time>{{ formatDate(item.updated_at || item.created_at) }}</time><a v-if="item.link_url" :href="item.link_url" target="_blank" rel="noopener noreferrer">查看详情<AppIcon name="arrow" size="14" /></a></footer></article></section>
     </nut-popup>
   </PageContainer>
 </template>
@@ -370,7 +421,18 @@ onBeforeUnmount(stopAdTimer)
 .rf-feed-infinite :deep(.nut-infinite-top) { color: var(--rf-muted); background: var(--rf-bg); }.rf-feed-infinite :deep(.nut-infinite-top .nut-icon) { color: var(--primary); }.rf-feed-more, .rf-feed-finished { display: flex; min-height: 54px; align-items: center; justify-content: center; gap: 8px; color: var(--rf-muted); font-size: 13px; }.rf-feed-finished { border-top: 1px solid var(--rf-line); }.rf-feed-more .rf-inline-spinner { width: 16px; height: 16px; border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent); border-top-color: var(--primary); border-radius: 50%; animation: rf-feed-spin .7s linear infinite; }@keyframes rf-feed-spin { to { transform: rotate(360deg); } }
 .rf-timeline { border-top: 1px solid var(--rf-line); }
 .rf-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 42px 20px; color: var(--rf-muted); text-align: center; }.rf-empty > span { color: var(--rf-muted); }.rf-empty .nut-empty { padding: 0; }.rf-empty .nut-button { margin-top: 8px; }
-.rf-notice-sheet { height: 100%; overflow-y: auto; padding: 22px 20px; background: var(--rf-bg); }.rf-notice-sheet header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }.rf-notice-sheet h2 { margin: 0; font-size: 20px; }.rf-notice-sheet article { padding: 16px 0; border-bottom: 1px solid var(--rf-line); }.rf-notice-sheet article div { display: flex; align-items: center; gap: 8px; }.rf-notice-sheet article b { color: var(--rf-danger); font-size: 12px; }.rf-notice-sheet article p { color: var(--rf-muted); white-space: pre-wrap; line-height: 1.6; }.rf-notice-sheet article time { color: var(--rf-faint); font-size: 12px; }
+.rf-notice-sheet { height: 100%; overflow-y: auto; padding: 22px 20px; background: var(--rf-bg); }.rf-notice-sheet header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }.rf-notice-sheet h2 { margin: 0; font-size: 20px; }.rf-notice-sheet header a { display: inline-flex; align-items: center; gap: 3px; color: var(--primary); font-size: 12px; font-weight: 700; }.rf-notice-sheet article { padding: 16px 0; border-bottom: 1px solid var(--rf-line); }.rf-notice-sheet article div { display: flex; align-items: center; gap: 8px; }.rf-notice-sheet article b { color: var(--rf-danger); font-size: 12px; }.rf-notice-sheet article p { color: var(--rf-muted); white-space: pre-wrap; line-height: 1.6; }.rf-notice-sheet article time { color: var(--rf-faint); font-size: 12px; }
 @media (max-width: 1019px) { .rf-home-sticky { top: var(--rf-header); } .rf-home-titlebar { display: none; } .rf-home-mobile-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rf-line); } .rf-home-mobile-search :deep(.nut-searchbar) { min-width: 0; flex: 1; padding: 0; border-radius: var(--rf-pill); } .rf-home-mobile-search :deep(.nut-searchbar__search-input) { border-radius: var(--rf-pill); } .rf-home-mobile-search > .nut-button { flex: 0 0 auto; } }
 @media (max-width: 560px) { .rf-ad-carousel { height: 104px; }.rf-composer { display: none; }.rf-pinned-row { padding-inline: 12px; }.rf-section-label { padding-inline: 12px; }.rf-home-mobile-search { padding-inline: 10px; }.rf-feed-gate { min-height: 260px; }.rf-home-mobile-search .rf-home-notice { width: 44px; height: 44px; flex-basis: 44px; } }
+.rf-news-list { display: flex; flex-direction: column; gap: 0; }
+.rf-news-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--rf-line); color: var(--rf-text); text-decoration: none; transition: background .12s; }
+.rf-news-row:hover { background: var(--rf-bg-subtle); }
+.rf-news-row:active { opacity: .92; }
+.rf-news-thumb { flex: 0 0 auto; width: 112px; height: 78px; overflow: hidden; border-radius: 10px; background: var(--rf-bg-subtle); }
+.rf-news-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.rf-news-thumb-placeholder { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; color: var(--rf-faint); background: var(--rf-bg-subtle); }
+.rf-news-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.rf-news-body h3 { margin: 0; font-size: 15px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.rf-news-row-meta { display: flex; align-items: center; gap: 12px; color: var(--rf-faint); font-size: 12px; }
+.rf-news-row-meta span:first-child { color: var(--rf-muted); }
 </style>

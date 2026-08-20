@@ -15,7 +15,7 @@ const sections = computed(() => [
     { key: '/', label: '首页', icon: 'home' },
     { key: '/boards/guides', label: '探索', icon: 'category' },
     { key: '/resources', label: '资源', icon: 'shop' },
-    { key: '/news', label: '新闻快报', icon: 'announcement' },
+    { key: '/announcements', label: '社区公告', icon: 'announcement' },
     { key: '/download', label: '客户端下载', icon: 'download' },
     { key: '/users', label: '用户', icon: 'people' },
     ...(auth.user ? [
@@ -41,6 +41,7 @@ const sections = computed(() => [
   ...(auth.isAdmin ? [{ label: '管理', items: [
     { key: '/admin/settings', label: '系统设置', icon: 'settings' },
     { key: '/admin/ads', label: '广告管理', icon: 'image' },
+    { key: '/admin/roblox-news', label: '新闻管理', icon: 'flame' },
     { key: '/admin/notices', label: '公告管理', icon: 'announcement' },
     { key: '/admin/music-categories', label: '音乐分区管理', icon: 'category' },
     { key: '/admin/resources', label: '资源审核', icon: 'review' },

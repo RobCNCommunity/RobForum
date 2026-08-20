@@ -658,7 +658,7 @@ CREATE TABLE IF NOT EXISTS notices (
   title VARCHAR(160) NOT NULL,
   content MEDIUMTEXT NOT NULL,
   link_url VARCHAR(500) NOT NULL DEFAULT '',
-  media_json VARCHAR(16000) NOT NULL DEFAULT '[]',
+  media_json MEDIUMTEXT NOT NULL DEFAULT ('[]'),
   level VARCHAR(16) NOT NULL DEFAULT 'info',
   pinned TINYINT(1) NOT NULL DEFAULT 0,
   enabled TINYINT(1) NOT NULL DEFAULT 1,
@@ -666,6 +666,19 @@ CREATE TABLE IF NOT EXISTS notices (
   created_at DATETIME(6) NOT NULL,
   updated_at DATETIME(6) NOT NULL,
   INDEX idx_notices_enabled (enabled, pinned, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS roblox_news (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(160) NOT NULL,
+  content MEDIUMTEXT NOT NULL,
+  link_url VARCHAR(500) NOT NULL DEFAULT '',
+  media_json MEDIUMTEXT NOT NULL DEFAULT ('[]'),
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_by BIGINT NULL,
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  INDEX idx_roblox_news_enabled (enabled, updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS post_likes (

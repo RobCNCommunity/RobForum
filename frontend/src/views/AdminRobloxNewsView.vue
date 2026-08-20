@@ -2,35 +2,35 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Notify } from '@nutui/nutui'
 import Sortable from 'sortablejs'
-import { createAdminNotice, deleteAdminNotice, errorMessage, fetchAdminNotices, updateAdminNotice, uploadAdminNoticeImage, type Notice, type NoticeMedia } from '@/api'
+import { createAdminRobloxNews, deleteAdminRobloxNews, errorMessage, fetchAdminRobloxNews, updateAdminRobloxNews, uploadAdminRobloxNewsImage, type RobloxNews, type RobloxNewsMedia } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import PageContainer from '@/components/PageContainer.vue'
 
 const loading = ref(true)
 const saving = ref(false)
-const items = ref<Notice[]>([])
-const media = ref<NoticeMedia[]>([])
+const items = ref<RobloxNews[]>([])
+const media = ref<RobloxNewsMedia[]>([])
 const mediaGrid = ref<HTMLElement | null>(null)
 const mediaInput = ref<HTMLInputElement | null>(null)
 const mediaUploading = ref(false)
 const previewMode = ref(false)
 let mediaSortable: Sortable | undefined
-const form = reactive({ id: 0, title: '', content: '', link_url: '', level: 'info', pinned: false, enabled: true })
+const form = reactive({ id: 0, title: '', content: '', link_url: '', enabled: true })
 
 async function load() {
   loading.value = true
   try {
-    items.value = await fetchAdminNotices()
+    items.value = await fetchAdminRobloxNews()
   } catch (error) {
-    Notify.danger(errorMessage(error, '公告加载失败'))
+    Notify.danger(errorMessage(error, '新闻加载失败'))
   } finally {
     loading.value = false
   }
 }
 
-function reset() { Object.assign(form, { id: 0, title: '', content: '', link_url: '', level: 'info', pinned: false, enabled: true }); media.value = []; previewMode.value = false }
-function edit(item: Notice) { Object.assign(form, { id: item.id, title: item.title, content: item.content, link_url: item.link_url || '', level: item.level || 'info', pinned: item.pinned, enabled: item.enabled }); media.value = [...(item.media || [])]; previewMode.value = false; void initializeMediaSorting() }
+function reset() { Object.assign(form, { id: 0, title: '', content: '', link_url: '', enabled: true }); media.value = []; previewMode.value = false }
+function edit(item: RobloxNews) { Object.assign(form, { id: item.id, title: item.title, content: item.content, link_url: item.link_url || '', enabled: item.enabled }); media.value = [...(item.media || [])]; previewMode.value = false; void initializeMediaSorting() }
 
 async function initializeMediaSorting() {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
@@ -53,11 +53,11 @@ async function chooseMedia(event: Event) {
   mediaUploading.value = true
   try {
     for (const file of files) {
-      if (!['image/png', 'image/jpeg'].includes(file.type)) { Notify.warn('公告图片仅支持 PNG 和 JPG'); continue }
-      media.value.push(await uploadAdminNoticeImage(file))
+      if (!['image/png', 'image/jpeg'].includes(file.type)) { Notify.warn('新闻图片仅支持 PNG 和 JPG'); continue }
+      media.value.push(await uploadAdminRobloxNewsImage(file))
     }
     await initializeMediaSorting()
-  } catch (error) { Notify.danger(errorMessage(error, '公告图片上传失败')) }
+  } catch (error) { Notify.danger(errorMessage(error, '新闻图片上传失败')) }
   finally { mediaUploading.value = false }
 }
 
@@ -71,58 +71,56 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = { title: form.title.trim(), content: form.content.trim(), media: media.value, link_url: form.link_url.trim(), level: form.level, pinned: false, enabled: form.enabled }
-    if (form.id) await updateAdminNotice(form.id, payload)
-    else await createAdminNotice(payload)
-    Notify.success('公告已保存')
+    const payload = { title: form.title.trim(), content: form.content.trim(), media: media.value, link_url: form.link_url.trim(), enabled: form.enabled }
+    if (form.id) await updateAdminRobloxNews(form.id, payload)
+    else await createAdminRobloxNews(payload)
+    Notify.success('新闻已保存')
     reset()
     await load()
   } catch (error) {
-    Notify.danger(errorMessage(error, '公告保存失败'))
+    Notify.danger(errorMessage(error, '新闻保存失败'))
   } finally {
     saving.value = false
   }
 }
 
 async function remove(id: number) {
-  if (!window.confirm('确定删除这条公告吗？')) return
+  if (!window.confirm('确定删除这条新闻吗？')) return
   try {
-    await deleteAdminNotice(id)
-    Notify.success('公告已删除')
+    await deleteAdminRobloxNews(id)
+    Notify.success('新闻已删除')
     await load()
   } catch (error) {
-    Notify.danger(errorMessage(error, '公告删除失败'))
+    Notify.danger(errorMessage(error, '新闻删除失败'))
   }
 }
 
-function levelLabel(level: string) { return ({ info: '普通', success: '进展', warning: '提醒', error: '重要' } as Record<string, string>)[level] || level }
 onMounted(load)
 onBeforeUnmount(() => mediaSortable?.destroy())
 </script>
 
 <template>
-  <PageContainer title="公告管理">
+  <PageContainer title="新闻管理">
     <div class="admin-grid">
       <section class="pro-card">
-        <header class="rf-panel-heading"><div><h3><AppIcon name="notice" size="18" />{{ form.id ? '编辑公告' : '发布公告' }}</h3><p>只把需要用户注意的内容放进公告，避免干扰信息流。</p></div><span class="rf-kicker">{{ form.id ? `#${form.id}` : 'NEW' }}</span></header>
+        <header class="rf-panel-heading"><div><h3><AppIcon name="flame" size="18" />{{ form.id ? '编辑新闻' : '发布新闻' }}</h3><p>发布 Roblox 平台动态、版本更新与官方活动消息。</p></div><span class="rf-kicker">{{ form.id ? `#${form.id}` : 'NEW' }}</span></header>
         <form class="rf-editor-form" @submit.prevent="save">
           <label class="rf-field-label"><span>标题</span><input v-model="form.title" class="rf-control" maxlength="120" required /></label>
           <label class="rf-field-label"><span>正文</span><div class="news-editor"><nav><button type="button" :class="{ active: !previewMode }" @click="previewMode = false"><AppIcon name="edit" size="15" />编辑</button><button type="button" :class="{ active: previewMode }" @click="previewMode = true"><AppIcon name="eye" size="15" />预览</button></nav><textarea v-if="!previewMode" v-model="form.content" class="rf-control rf-textarea" rows="7" maxlength="10000" required /><div v-else class="news-editor-preview"><MarkdownContent :source="form.content || '暂无内容'" /></div></div></label>
-          <div class="rf-field-label news-media-field"><span>公告图片（最多 4 张，可拖拽排序）</span><div v-if="media.length" ref="mediaGrid" class="news-media-grid"><figure v-for="(item, index) in media" :key="item.url"><img :src="item.url" alt="" /><button type="button" class="news-media-drag" :aria-label="`拖动第 ${index + 1} 张图片`"><AppIcon name="drag" size="16" /></button><button type="button" class="news-media-remove" :aria-label="`移除第 ${index + 1} 张图片`" @click="removeMedia(index)"><AppIcon name="close" size="15" /></button></figure></div><button type="button" class="rf-secondary-button news-media-picker" :disabled="mediaUploading || media.length >= 4" @click="mediaInput?.click()"><AppIcon name="upload" size="16" />{{ mediaUploading ? '上传中…' : media.length >= 4 ? '已达到 4 张' : '从本地图库添加图片' }}</button><input ref="mediaInput" type="file" accept="image/png,image/jpeg" multiple class="news-media-input" @change="chooseMedia" /></div>
-          <label class="rf-field-label"><span>跳转链接（可选）</span><input v-model="form.link_url" class="rf-control" type="url" maxlength="500" placeholder="https://example.com/notice" /></label>
-          <label class="rf-field-label"><span>级别</span><select v-model="form.level" class="rf-control"><option value="info">普通</option><option value="success">进展</option><option value="warning">提醒</option><option value="error">重要</option></select></label>
-          <div class="rf-choice-row"><label class="rf-switch-row"><input v-model="form.enabled" type="checkbox" /><span class="rf-toggle" aria-hidden="true" /><span>启用展示</span></label></div>
-          <div class="rf-form-actions"><nut-button type="primary" :loading="saving" :disabled="mediaUploading" @click="save">保存公告</nut-button><button type="button" class="rf-secondary-button" @click="reset">清空</button></div>
+          <div class="rf-field-label news-media-field"><span>新闻图片（最多 4 张，可拖拽排序）</span><div v-if="media.length" ref="mediaGrid" class="news-media-grid"><figure v-for="(item, index) in media" :key="item.url"><img :src="item.url" alt="" /><button type="button" class="news-media-drag" :aria-label="`拖动第 ${index + 1} 张图片`"><AppIcon name="drag" size="16" /></button><button type="button" class="news-media-remove" :aria-label="`移除第 ${index + 1} 张图片`" @click="removeMedia(index)"><AppIcon name="close" size="15" /></button></figure></div><button type="button" class="rf-secondary-button news-media-picker" :disabled="mediaUploading || media.length >= 4" @click="mediaInput?.click()"><AppIcon name="upload" size="16" />{{ mediaUploading ? '上传中…' : media.length >= 4 ? '已达到 4 张' : '从本地图库添加图片' }}</button><input ref="mediaInput" type="file" accept="image/png,image/jpeg" multiple class="news-media-input" @change="chooseMedia" /></div>
+          <label class="rf-field-label"><span>原文链接（可选）</span><input v-model="form.link_url" class="rf-control" type="url" maxlength="500" placeholder="https://devforum.roblox.com/ 或官方公告地址" /></label>
+          <div class="rf-choice-row"><label class="rf-switch-row"><input v-model="form.enabled" type="checkbox" /><span class="rf-toggle" aria-hidden="true" /><span>公开展示</span></label></div>
+          <div class="rf-form-actions"><nut-button type="primary" :loading="saving" :disabled="mediaUploading" @click="save">保存新闻</nut-button><button type="button" class="rf-secondary-button" @click="reset">清空</button></div>
         </form>
       </section>
 
       <section class="pro-card">
-        <header class="rf-panel-heading"><div><h3>公告列表</h3><p>已删除的公告不会再出现在首页铃铛中。</p></div><span class="rf-count">{{ items.length }}</span></header>
+        <header class="rf-panel-heading"><div><h3>新闻列表</h3><p>停用的新闻不会出现在「新闻快报」页面。</p></div><span class="rf-count">{{ items.length }}</span></header>
         <div v-if="loading" class="rf-list-loading"><span v-for="n in 3" :key="n" /></div>
-        <div v-else-if="!items.length" class="rf-empty"><AppIcon name="notice" size="28" /><strong>暂无公告</strong><span>发布一条公告后会显示在这里。</span></div>
+        <div v-else-if="!items.length" class="rf-empty"><AppIcon name="flame" size="28" /><strong>暂无新闻</strong><span>发布一条新闻后会显示在这里。</span></div>
         <div v-else class="rf-admin-list">
           <article v-for="item in items" :key="item.id" class="rf-admin-list-row rf-admin-list-row--stacked">
-            <div class="rf-admin-list-copy"><div class="rf-list-title"><strong>{{ item.title }}</strong><span class="rf-status-chip" :class="item.enabled ? 'is-on' : ''">{{ item.enabled ? '启用' : '停用' }}</span></div><small>{{ levelLabel(item.level) }} · {{ new Date(item.updated_at || item.created_at).toLocaleString('zh-CN') }}</small><MarkdownContent :source="item.content" compact /><div v-if="item.media?.length" class="news-admin-thumbs"><img v-for="image in item.media" :key="image.url" :src="image.url" alt="" /></div><a v-if="item.link_url" :href="item.link_url" target="_blank" rel="noopener noreferrer" class="rf-notice-admin-link"><AppIcon name="link" size="14" />{{ item.link_url }}</a></div>
+            <div class="rf-admin-list-copy"><div class="rf-list-title"><strong>{{ item.title }}</strong><span class="rf-status-chip" :class="item.enabled ? 'is-on' : ''">{{ item.enabled ? '启用' : '停用' }}</span></div><small>{{ new Date(item.updated_at || item.created_at).toLocaleString('zh-CN') }}</small><MarkdownContent :source="item.content" compact /><div v-if="item.media?.length" class="news-admin-thumbs"><img v-for="image in item.media" :key="image.url" :src="image.url" alt="" /></div><a v-if="item.link_url" :href="item.link_url" target="_blank" rel="noopener noreferrer" class="rf-notice-admin-link"><AppIcon name="link" size="14" />{{ item.link_url }}</a></div>
             <div class="rf-row-actions"><button type="button" class="rf-secondary-button rf-button-small" @click="edit(item)">编辑</button><button type="button" class="rf-danger-button rf-button-small" @click="remove(item.id)">删除</button></div>
           </article>
         </div>

@@ -211,6 +211,20 @@ export interface Notice {
 
 export interface NoticeMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
 
+export interface RobloxNews {
+  id: number
+  title: string
+  content: string
+  link_url: string
+  media?: RobloxNewsMedia[]
+  enabled: boolean
+  created_by?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface RobloxNewsMedia { id: number; url: string; mime_type: string; width: number; height: number; size_bytes: number }
+
 export interface WalletEntry {
   id: number
   user_id: number
@@ -410,6 +424,13 @@ export async function createAdminAd(input: { title?: string; image_url?: string;
 export async function updateAdminAd(id: number, input: { title?: string; image_url?: string; link_url?: string; sort_order?: number; enabled?: boolean }) { return data<AdSlot>(await api.put('/admin/ads/' + id, input)) }
 export async function deleteAdminAd(id: number) { return data<{ deleted: boolean }>(await api.delete('/admin/ads/' + id)) }
 export async function fetchNotices() { return data<Notice[]>(await api.get('/notices')) }
+export async function fetchRobloxNews() { return data<RobloxNews[]>(await api.get('/roblox-news')) }
+export async function fetchRobloxNewsById(id: number) { return data<RobloxNews>(await api.get(`/roblox-news/${id}`)) }
+export async function fetchAdminRobloxNews() { return data<RobloxNews[]>(await api.get('/admin/roblox-news')) }
+export async function uploadAdminRobloxNewsImage(file: File) { const form = new FormData(); form.append('file', file); return data<RobloxNewsMedia>(await api.post('/admin/roblox-news/media', form)) }
+export async function createAdminRobloxNews(input: { title: string; content: string; media?: RobloxNewsMedia[]; link_url?: string; enabled?: boolean }) { return data<RobloxNews>(await api.post('/admin/roblox-news', input)) }
+export async function updateAdminRobloxNews(id: number, input: { title?: string; content?: string; media?: RobloxNewsMedia[]; link_url?: string; enabled?: boolean }) { return data<RobloxNews>(await api.put('/admin/roblox-news/' + id, input)) }
+export async function deleteAdminRobloxNews(id: number) { return data<{ deleted: boolean }>(await api.delete('/admin/roblox-news/' + id)) }
 export async function fetchAdminNotices() { return data<Notice[]>(await api.get('/admin/notices')) }
 export async function uploadAdminNoticeImage(file: File) { const form = new FormData(); form.append('file', file); return data<NoticeMedia>(await api.post('/admin/notices/media', form)) }
 export async function createAdminNotice(input: { title: string; content: string; media?: NoticeMedia[]; link_url?: string; level?: string; pinned?: boolean; enabled?: boolean }) { return data<Notice>(await api.post('/admin/notices', input)) }
